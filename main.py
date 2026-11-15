@@ -94,6 +94,8 @@ def build_settings_and_knowledge():
         paths.resources / "default_knowledge.json",
         paths.config,
         paths.knowledge,
+        paths.resources / "default_junk.json",
+        paths.junk,
     )
     store = SettingsStore(paths.config, paths.resources / "default_config.json")
     settings = store.load()

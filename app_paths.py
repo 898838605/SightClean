@@ -83,6 +83,7 @@ class AppPaths:
     root: Path          # 数据根目录
     config: Path        # config.json
     knowledge: Path     # 知识库.json（外置）
+    junk: Path          # 垃圾清理规则.json（外置）
     user_rules: Path    # 我的规则.json（用户层）
     cache: Path         # cache.json
     logs: Path          # 删除记录目录
@@ -107,6 +108,7 @@ def resolve() -> AppPaths:
         root=root,
         config=root / "config.json",
         knowledge=root / "知识库.json",
+        junk=root / "垃圾清理规则.json",
         user_rules=root / "我的规则.json",
         cache=root / "cache.json",
         logs=logs,

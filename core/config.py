@@ -311,6 +311,8 @@ def ensure_first_run_files(
     default_knowledge: Path,
     config_path: Path,
     knowledge_path: Path,
+    default_junk: Path | None = None,
+    junk_path: Path | None = None,
 ) -> list[str]:
     """首次运行时，把内置默认落成 exe 旁边可以编辑的文件。
 
@@ -320,10 +322,12 @@ def ensure_first_run_files(
     import shutil
 
     notes: list[str] = []
-    pairs = (
+    pairs = [
         (default_config, config_path, "config.json"),
         (default_knowledge, knowledge_path, "知识库.json"),
-    )
+    ]
+    if default_junk is not None and junk_path is not None:
+        pairs.append((default_junk, junk_path, "垃圾清理规则.json"))
     for source, target, label in pairs:
         try:
             if target.exists() or not source.exists():

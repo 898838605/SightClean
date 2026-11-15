@@ -83,13 +83,26 @@ class CleanOutcome:
 # --------------------------------------------------------------------------- #
 # 规则
 # --------------------------------------------------------------------------- #
+_RULES_CACHE: Path | None = None
+
+
 def rules_path() -> Path:
-    """优先用用户改过的规则，没有就用内置的。"""
-    resource = Path(resource_dir())
-    custom = resource.parent / "垃圾清理规则.json"
+    """优先用 exe 旁边那份（用户可以改），没有就用内置的。
+
+    注意不能拿 resource_dir() 的 parent —— 打包后那是临时解包目录
+    （%TEMP%\_MEIxxxx），用户改的文件在 exe 旁边，读不到。
+    """
+    global _RULES_CACHE
+    if _RULES_CACHE is not None and _RULES_CACHE.is_file():
+        return _RULES_CACHE
+
+    from app_paths import resolve
+
+    custom = resolve().junk
     if custom.is_file():
+        _RULES_CACHE = custom
         return custom
-    return resource / "default_junk.json"
+    return Path(resource_dir()) / "default_junk.json"
 
 
 def load_rules() -> list[JunkCategory]:
