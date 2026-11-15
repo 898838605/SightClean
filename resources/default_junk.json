@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "version": "2026.11.15",
+  "note": "C 盘垃圾清理规则。paths 支持环境变量和 * 通配；mode 决定是清空目录内容还是整个删掉。",
+  "categories": [
+    {
+      "id": "temp",
+      "label": "临时文件",
+      "purpose": "系统或软件运行时产生的临时数据。",
+      "detail": "这些文件本来就是用完就该扔的，删了软件会自动重建。正在运行的程序占用的那部分会跳过。",
+      "risk": "safe",
+      "mode": "contents",
+      "paths": [
+        "%TEMP%",
+        "%WINDIR%\\Temp"
+      ]
+    },
+    {
+      "id": "logs",
+      "label": "系统日志",
+      "purpose": "系统或应用生成的日志文件。",
+      "detail": "排查问题用的历史记录，删了不影响使用。如果你最近在查蓝屏原因，先别清。",
+      "risk": "caution",
+      "mode": "contents",
+      "paths": [
+        "%WINDIR%\\Logs",
+        "%WINDIR%\\System32\\LogFiles",
+        "%PROGRAMDATA%\\Microsoft\\Windows\\WER\\ReportArchive",
+        "%PROGRAMDATA%\\Microsoft\\Windows\\WER\\ReportQueue",
+        "%PROGRAMDATA%\\Microsoft\\Windows\\WER\\Temp"
+      ]
+    },
+    {
+      "id": "thumbnails",
+      "label": "缩略图缓存",
+      "purpose": "Windows 为快速显示图片预览而生成的缓存。",
+      "detail": "删了以后第一次打开图片文件夹会慢一点点，之后又自动生成。",
+      "risk": "safe",
+      "mode": "pattern",
+      "paths": [
+        "%LOCALAPPDATA%\\Microsoft\\Windows\\Explorer\\thumbcache_*.db",
+        "%LOCALAPPDATA%\\Microsoft\\Windows\\Explorer\\iconcache_*.db"
+      ]
+    },
+    {
+      "id": "browser",
+      "label": "浏览器缓存",
+      "purpose": "主流浏览器产生的网页缓存。",
+      "detail": "网页的图片和脚本副本。删了网站第一次打开会重下，登录状态和收藏夹不受影响。",
+      "risk": "safe",
+      "mode": "contents",
+      "paths": [
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Cache",
+        "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Code Cache",
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Cache",
+        "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Code Cache",
+        "%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles\\*\\cache2",
+        "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Cache"
+      ]
+    },
+    {
+      "id": "packages",
+      "label": "包管理器缓存",
+      "purpose": "例如 pip、npm 等开发工具下载的包缓存。",
+      "detail": "下载过的安装包副本。删了以后下次装同一个包要重新下载，功能不受影响。",
+      "risk": "safe",
+      "mode": "contents",
+      "paths": [
+        "%LOCALAPPDATA%\\pip\\Cache",
+        "%APPDATA%\\npm-cache",
+        "%LOCALAPPDATA%\\npm-cache",
+        "%LOCALAPPDATA%\\Yarn\\Cache",
+        "%LOCALAPPDATA%\\pnpm\\store"
+      ]
+    }
+  ]
+}

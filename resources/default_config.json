@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "auto_size": true,
+  "auto_size_concurrency": 2,
+  "confirm_recycle": false,
+  "show_hidden": false,
+  "size_cache_ttl_hours": 24,
+  "log_keep_count": 30,
+  "recycle_warn_over_gb": 20,
+  "window_width": 1200,
+  "window_height": 760,
+  "last_dir": "",
+  "last_module": 0,
+  "user_rules": [],
+  "ai": {
+    "enabled": false,
+    "provider": "custom",
+    "base_url": "",
+    "model": "",
+    "api_key": "",
+    "mask_username": true,
+    "timeout_seconds": 15,
+    "max_batch": 20,
+    "temperature": 0.1
+  },
+  "theme": "system",
+  "font_scale": "medium"
+}

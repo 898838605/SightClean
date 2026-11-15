@@ -1,0 +1,901 @@
+{
+  "schema": 3,
+  "version": "2026.11.4",
+  "note": "layer 1=系统目录库 2=软件目录库 3=扩展名兜底；同层按数组顺序先命中先用；用户规则优先于这里。",
+  "rules": [
+    {
+      "id": "win-update-download",
+      "layer": 1,
+      "pattern": "\\softwaredistribution\\download\\",
+      "match": "path_contains",
+      "effect": "Windows 更新下载到本地的安装包，装完就没用了。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响系统，下次更新会重新下载"
+    },
+    {
+      "id": "win-temp",
+      "layer": 1,
+      "pattern": "\\windows\\temp\\",
+      "match": "path_contains",
+      "effect": "系统装软件、打补丁时临时用的地方，装完就没用了。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响使用，系统和软件会自己重建"
+    },
+    {
+      "id": "windows-prefetch",
+      "layer": 1,
+      "pattern": "\\prefetch\\",
+      "match": "path_contains",
+      "effect": "系统为了开机快而记下的启动信息，删了会自动重建。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了开机头几次会慢一点，之后自动重建"
+    },
+    {
+      "id": "windows-wer",
+      "layer": 1,
+      "pattern": "\\programdata\\microsoft\\windows\\wer\\",
+      "match": "path_contains",
+      "effect": "程序出错时排队上报给微软的记录，删了不影响使用。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响使用，只是以后少了这些崩溃记录"
+    },
+    {
+      "id": "windows-perflogs",
+      "layer": 1,
+      "pattern": "\\perflogs\\",
+      "match": "path_contains",
+      "effect": "系统性能记录，普通使用用不到。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响使用，只是以后查性能问题少一份数据"
+    },
+    {
+      "id": "windows-recycle-bin",
+      "layer": 1,
+      "pattern": "\\$recycle.bin\\",
+      "match": "path_contains",
+      "effect": "这块盘上的回收站，里面是你删过但还能找回来的东西。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了回收站里那些还能找回来的东西就真没了"
+    },
+    {
+      "id": "windows-recovery",
+      "layer": 1,
+      "pattern": "\\recovery\\",
+      "match": "path_contains",
+      "effect": "系统恢复环境，系统坏了靠它自救。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了系统坏了就进不了恢复环境，可能要重装"
+    },
+    {
+      "id": "windows-systemvolumeinfo",
+      "layer": 1,
+      "pattern": "\\system volume information\\",
+      "match": "path_contains",
+      "effect": "系统还原点和卷影副本，删了就没法用系统还原救回之前的状态。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了系统还原点全没，出问题回不到之前的状态"
+    },
+    {
+      "id": "windows-boot",
+      "layer": 1,
+      "pattern": "^[a-z]:\\\\boot\\\\",
+      "match": "path_regex",
+      "effect": "开机引导用的文件，删了电脑直接开不了机。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了电脑开机直接失败，要修引导或重装"
+    },
+    {
+      "id": "windows-registry-config",
+      "layer": 1,
+      "pattern": "^[a-z]:\\\\windows\\\\system32\\\\config\\\\",
+      "match": "path_regex",
+      "effect": "注册表数据库本体，删了系统直接起不来。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了系统当场起不来，只能重装或进恢复环境"
+    },
+    {
+      "id": "windows-winsxs",
+      "layer": 1,
+      "pattern": "\\winsxs\\",
+      "match": "path_contains",
+      "effect": "系统组件仓库，Windows 自己管理，不要动。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了系统更新装不上、部分功能报错，还会被判为系统损坏"
+    },
+    {
+      "id": "windows-installer",
+      "layer": 1,
+      "pattern": "\\windows\\installer\\",
+      "match": "path_contains",
+      "effect": "已安装软件的卸载/修复信息，删了很多软件卸载不掉。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了很多软件卸不掉也改不了，重装时同样会报错"
+    },
+    {
+      "id": "windows-pagefile",
+      "layer": 1,
+      "pattern": "pagefile.sys",
+      "match": "path_contains",
+      "effect": "虚拟内存文件，系统正在使用，删不了也不该删。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了内存不够用时程序和系统会崩"
+    },
+    {
+      "id": "windows-hiberfil",
+      "layer": 1,
+      "pattern": "hiberfil.sys",
+      "match": "path_contains",
+      "effect": "休眠文件，要关休眠请去电源选项，别手动删。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了休眠和快速启动失效，可能关不干净机"
+    },
+    {
+      "id": "windows-swapfile",
+      "layer": 1,
+      "pattern": "swapfile.sys",
+      "match": "path_contains",
+      "effect": "系统给应用商店程序用的交换文件，属于系统运行必需。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了应用商店的程序可能打不开"
+    },
+    {
+      "id": "program-files-x86",
+      "layer": 1,
+      "pattern": "\\program files (x86)\\",
+      "match": "path_contains",
+      "effect": "安装的 32 位软件本体，要卸载请走系统设置，别手动删。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了对应软件直接不能用，而且没法正常卸载重装"
+    },
+    {
+      "id": "program-files",
+      "layer": 1,
+      "pattern": "\\program files\\",
+      "match": "path_contains",
+      "effect": "安装的软件本体，要卸载请走系统设置，别手动删。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了对应软件直接不能用，注册表和快捷方式还在，收拾起来更麻烦"
+    },
+    {
+      "id": "windows-programdata",
+      "layer": 1,
+      "pattern": "\\programdata\\",
+      "match": "path_contains",
+      "effect": "软件存的配置、数据库、许可证，随便删会让软件不能用。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了软件会丢配置、许可证甚至数据库，多半要重装"
+    },
+    {
+      "id": "windows-root",
+      "layer": 1,
+      "pattern": "\\windows\\",
+      "match": "path_contains",
+      "effect": "Windows 系统文件，删了轻则功能异常、重则开不了机。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了轻则系统功能大面积异常，重则开不了机"
+    },
+    {
+      "id": "appdata-local-temp",
+      "layer": 2,
+      "pattern": "\\appdata\\local\\temp\\",
+      "match": "path_contains",
+      "effect": "程序运行时临时写下的东西，用完就没用了。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响使用，程序会自己重建"
+    },
+    {
+      "id": "browser-inetcache",
+      "layer": 2,
+      "pattern": "\\inetcache\\",
+      "match": "path_contains",
+      "effect": "上网时留下的网页缓存，删了网页下次打开会慢一点。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了网页第一次打开慢一点，不影响登录"
+    },
+    {
+      "id": "explorer-thumbcache",
+      "layer": 2,
+      "pattern": "\\explorer\\thumbcache",
+      "match": "path_contains",
+      "effect": "文件夹缩略图缓存，删了会自动重建。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了缩略图要重新生成，文件夹第一次打开会慢"
+    },
+    {
+      "id": "gpu-d3dscache",
+      "layer": 2,
+      "pattern": "\\d3dscache\\",
+      "match": "path_contains",
+      "effect": "显卡渲染缓存，游戏会自己重建，删了首次加载慢一点。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了游戏第一次加载慢一点，之后自动重建"
+    },
+    {
+      "id": "gpu-nvidia-dx",
+      "layer": 2,
+      "pattern": "\\nvidia\\dxcache\\",
+      "match": "path_contains",
+      "effect": "NVIDIA 显卡的着色器缓存，可随时重建。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了游戏第一次加载慢一点，之后自动重建"
+    },
+    {
+      "id": "gpu-nvidia-gl",
+      "layer": 2,
+      "pattern": "\\nvidia\\glcache\\",
+      "match": "path_contains",
+      "effect": "NVIDIA 显卡的着色器缓存，可随时重建。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了游戏第一次加载慢一点，之后自动重建"
+    },
+    {
+      "id": "gpu-amd-dx",
+      "layer": 2,
+      "pattern": "\\amd\\dxcache\\",
+      "match": "path_contains",
+      "effect": "AMD 显卡的着色器缓存，可随时重建。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了游戏第一次加载慢一点，之后自动重建"
+    },
+    {
+      "id": "app-crashdumps",
+      "layer": 2,
+      "pattern": "\\crashdumps\\",
+      "match": "path_contains",
+      "effect": "程序崩溃时留下的现场记录，不查原因就用不到。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响使用，只是以后没法追查这几次崩溃"
+    },
+    {
+      "id": "dev-pip-cache",
+      "layer": 2,
+      "pattern": "\\pip\\cache\\",
+      "match": "path_contains",
+      "effect": "Python 装库时下载的安装包缓存，删了下次要重新下载。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了下次装库要重新下载，多花流量和时间"
+    },
+    {
+      "id": "dev-npm-cache",
+      "layer": 2,
+      "pattern": "\\npm-cache\\",
+      "match": "path_contains",
+      "effect": "Node.js 装包时的下载缓存，删了下次要重新下载。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了下次装包要重新下载，构建会慢一些"
+    },
+    {
+      "id": "dev-dot-cache",
+      "layer": 2,
+      "pattern": "\\.cache\\",
+      "match": "path_contains",
+      "effect": "各种开发工具自己攒的缓存，删了会重新生成。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了工具会自己重建，下次启动慢一点"
+    },
+    {
+      "id": "dev-pycache",
+      "layer": 2,
+      "pattern": "\\__pycache__\\",
+      "match": "path_contains",
+      "effect": "Python 运行代码时自动生成的中间文件，删了会自动重建。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了 Python 会自己重新生成，第一次运行稍慢"
+    },
+    {
+      "id": "browser-chrome-cache",
+      "layer": 2,
+      "pattern": "\\google\\chrome\\user data\\",
+      "match": "path_contains",
+      "effect": "Chrome 的浏览器数据，含缓存也含登录状态，整删会丢登录。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了会丢登录状态、扩展设置和本地浏览记录"
+    },
+    {
+      "id": "browser-edge-cache",
+      "layer": 2,
+      "pattern": "\\microsoft\\edge\\user data\\",
+      "match": "path_contains",
+      "effect": "Edge 的浏览器数据，含缓存也含登录状态，整删会丢登录。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了会丢登录状态、扩展设置和本地浏览记录"
+    },
+    {
+      "id": "browser-firefox",
+      "layer": 2,
+      "pattern": "\\mozilla\\firefox\\profiles\\",
+      "match": "path_contains",
+      "effect": "Firefox 的配置和缓存，删了会丢书签和登录。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了会丢书签、密码和登录状态"
+    },
+    {
+      "id": "dev-node-modules",
+      "layer": 2,
+      "pattern": "\\node_modules\\",
+      "match": "path_contains",
+      "effect": "前端项目装的第三方依赖，删了项目跑不起来，要用时重新 install。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了项目立刻跑不起来，要重新 install，还可能装不回同样的版本"
+    },
+    {
+      "id": "dev-venv",
+      "layer": 2,
+      "pattern": "\\.venv\\",
+      "match": "path_contains",
+      "effect": "Python 项目的独立运行环境，删了要重建环境、重装依赖。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了要重建环境重装依赖，项目暂时跑不起来"
+    },
+    {
+      "id": "dev-venv-plain",
+      "layer": 2,
+      "pattern": "\\venv\\",
+      "match": "path_contains",
+      "effect": "Python 项目的独立运行环境，删了要重建环境、重装依赖。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了要重建环境重装依赖，项目暂时跑不起来"
+    },
+    {
+      "id": "installer-package-cache",
+      "layer": 2,
+      "pattern": "\\package cache\\",
+      "match": "path_contains",
+      "effect": "很多软件安装包的备份，修复/卸载时可能要用到。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了以后修复或重装这些软件要重新下载安装包"
+    },
+    {
+      "id": "print-spool",
+      "layer": 2,
+      "pattern": "\\spool\\",
+      "match": "path_contains",
+      "effect": "打印机驱动和排队中的打印任务，打印机在用的时候别动。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了排队的打印任务会丢，正在打的可能打一半"
+    },
+    {
+      "id": "user-downloads",
+      "layer": 2,
+      "pattern": "\\downloads\\",
+      "match": "path_contains",
+      "effect": "浏览器默认的下载目录，你自己下载的东西都在这里。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了下载的东西就没了，回收站里还能找回来"
+    },
+    {
+      "id": "user-desktop",
+      "layer": 2,
+      "pattern": "\\desktop\\",
+      "match": "path_contains",
+      "effect": "桌面上的东西，一般都有用。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了桌面上的快捷方式和文件就没了"
+    },
+    {
+      "id": "user-videos",
+      "layer": 2,
+      "pattern": "\\videos\\",
+      "match": "path_contains",
+      "effect": "视频目录，往往是你自己拍的或剪的。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了视频就没了，自己拍的原件通常没有第二份"
+    },
+    {
+      "id": "user-music",
+      "layer": 2,
+      "pattern": "\\music\\",
+      "match": "path_contains",
+      "effect": "音乐目录，确认还能再下载到再删。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了音乐就没了，除非还能重新下载"
+    },
+    {
+      "id": "user-pictures",
+      "layer": 2,
+      "pattern": "\\pictures\\",
+      "match": "path_contains",
+      "effect": "图片目录，照片删了很难找回，先确认有没有备份。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了照片就没了，自己拍的原件一般没有备份"
+    },
+    {
+      "id": "user-documents",
+      "layer": 2,
+      "pattern": "\\documents\\",
+      "match": "path_contains",
+      "effect": "文档目录，你的资料多半在这里，删了没有备份就找不回来。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了资料就没了，工作文档通常没有第二份"
+    },
+    {
+      "id": "cloud-onedrive",
+      "layer": 2,
+      "pattern": "\\onedrive\\",
+      "match": "path_contains",
+      "effect": "OneDrive 同步目录，里面可能有只在云端保存的文件，删了云端一起消失。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了云端那份会一起消失，别的设备上也找不回来"
+    },
+    {
+      "id": "game-steam",
+      "layer": 2,
+      "pattern": "\\steamapps\\common\\",
+      "match": "path_contains",
+      "effect": "Steam 装的游戏本体，删了要重新下载几十 GB，不玩了请用 Steam 卸载。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了要重新下载几十 GB，存档可能一起没"
+    },
+    {
+      "id": "dev-docker",
+      "layer": 2,
+      "pattern": "\\docker\\",
+      "match": "path_contains",
+      "effect": "Docker 的镜像和容器数据，删了容器和镜像全没。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了镜像和容器全没，要重新拉取和构建"
+    },
+    {
+      "id": "dev-git",
+      "layer": 2,
+      "pattern": "\\.git\\",
+      "match": "path_contains",
+      "effect": "这个项目的版本历史，删了整个项目只剩当前状态，之前的改动全没了。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了整个项目的提交历史全没，只剩当前文件状态"
+    },
+    {
+      "id": "cred-ssh",
+      "layer": 2,
+      "pattern": "%USERPROFILE%\\.ssh\\",
+      "match": "path_contains",
+      "effect": "远程登录服务器用的密钥，删了没有备份就再也连不上那台服务器。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了再也连不上那台服务器，对方没留别的钥匙就只能重置"
+    },
+    {
+      "id": "cred-gnupg",
+      "layer": 2,
+      "pattern": "%USERPROFILE%\\.gnupg\\",
+      "match": "path_contains",
+      "effect": "加密和签名用的密钥，删了用这些密钥加密过的文件就解不开。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了用这些密钥加密过的文件永远解不开"
+    },
+    {
+      "id": "appdata-roaming",
+      "layer": 2,
+      "pattern": "\\appdata\\roaming\\",
+      "match": "path_contains",
+      "effect": "软件存配置、账号、插件的地方，删了软件会回到初始状态。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了软件回到初始状态，登录、插件、个人设置全丢"
+    },
+    {
+      "id": "ext-vmdk",
+      "layer": 3,
+      "pattern": "vmdk",
+      "match": "ext",
+      "effect": "虚拟机硬盘文件，删了虚拟机里的系统和数据全没。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了虚拟机里的系统和数据全没，宿主上找不回来"
+    },
+    {
+      "id": "ext-vhdx",
+      "layer": 3,
+      "pattern": "vhdx",
+      "match": "ext",
+      "effect": "虚拟硬盘文件，删了里面的系统和数据全没。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了虚拟硬盘里的系统和数据全没"
+    },
+    {
+      "id": "ext-vdi",
+      "layer": 3,
+      "pattern": "vdi",
+      "match": "ext",
+      "effect": "虚拟机硬盘文件，删了虚拟机里的系统和数据全没。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了虚拟机里的系统和数据全没"
+    },
+    {
+      "id": "ext-iso",
+      "layer": 3,
+      "pattern": "iso",
+      "match": "ext",
+      "effect": "系统或软件的安装镜像，删了要重新下载。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了要重新下载，大镜像很费时间"
+    },
+    {
+      "id": "ext-bak",
+      "layer": 3,
+      "pattern": "bak",
+      "match": "ext",
+      "effect": "备份文件，确认新版本没问题再删。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了出问题时没有退路，确认新版没问题再动手"
+    },
+    {
+      "id": "ext-log",
+      "layer": 3,
+      "pattern": "log",
+      "match": "ext",
+      "effect": "日志文件，出问题时要靠它排查，删前想一下。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了出问题时没法追查现场"
+    },
+    {
+      "id": "ext-old",
+      "layer": 3,
+      "pattern": "old",
+      "match": "ext",
+      "effect": "旧版本备份，确认不再需要再删。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了想退回旧版本时没有备份可用"
+    },
+    {
+      "id": "ext-tmp",
+      "layer": 3,
+      "pattern": "tmp",
+      "match": "ext",
+      "effect": "临时文件，一般可以删。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了一般不影响使用"
+    },
+    {
+      "id": "ext-temp",
+      "layer": 3,
+      "pattern": "temp",
+      "match": "ext",
+      "effect": "临时文件，一般可以删。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了一般不影响使用"
+    },
+    {
+      "id": "ext-dmp",
+      "layer": 3,
+      "pattern": "dmp",
+      "match": "ext",
+      "effect": "程序崩溃时的内存转储，不分析原因就用不到。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了不影响使用，只是没法再分析这次崩溃"
+    },
+    {
+      "id": "ext-crdownload",
+      "layer": 3,
+      "pattern": "crdownload",
+      "match": "ext",
+      "effect": "没下载完的半截文件，可以删。",
+      "risk": "safe",
+      "source": "builtin",
+      "impact": "删了那个没下完的文件就作废，得重新下载"
+    },
+    {
+      "id": "sw-vcredist",
+      "kind": "software",
+      "layer": 1,
+      "pattern": "visual c++",
+      "match": "name_contains",
+      "effect": "微软运行库，很多软件要靠它才能跑，卸了那些软件会起不来。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "卸了依赖它的软件会启动报错，通常只能重装运行库修复"
+    },
+    {
+      "id": "sw-dotnet",
+      "kind": "software",
+      "layer": 1,
+      "pattern": ".net",
+      "match": "name_contains",
+      "effect": "微软 .NET 运行环境，大量软件依赖它，卸了会集体报错。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "卸了大量软件和系统组件会报错，可能要重装系统组件"
+    },
+    {
+      "id": "sw-runtime",
+      "kind": "software",
+      "layer": 1,
+      "pattern": "runtime",
+      "match": "name_contains",
+      "effect": "运行库一类的组件，通常是给别的软件用的，单独卸掉没好处。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "卸了调用它的软件可能起不来"
+    },
+    {
+      "id": "sw-driver",
+      "kind": "software",
+      "layer": 1,
+      "pattern": "driver",
+      "match": "name_contains",
+      "effect": "驱动相关的组件，卸错可能让硬件失灵，建议用设备管理器处理。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "卸了对应硬件可能失灵，屏幕、声音、网络都可能出问题"
+    },
+    {
+      "id": "sw-sdk",
+      "kind": "software",
+      "layer": 2,
+      "pattern": "sdk",
+      "match": "name_contains",
+      "effect": "开发工具包，不写代码了就可以卸，但你自己的项目可能要用。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "卸了以后要开发得重新装，已有项目可能编译不过"
+    },
+    {
+      "id": "sw-browser-toolbar",
+      "kind": "software",
+      "layer": 2,
+      "pattern": "toolbar",
+      "match": "name_contains",
+      "effect": "浏览器工具条，多数是捆绑装进来的，一般可以卸。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "卸了浏览器工具栏会消失，一般不影响正常浏览"
+    },
+    {
+      "id": "reg-hklm-system",
+      "kind": "registry",
+      "layer": 1,
+      "pattern": "hklm\\system",
+      "match": "key_prefix",
+      "effect": "系统内核配置：硬件、驱动、服务都在这里，删了直接起不来。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了系统当场起不来，只能重装或进恢复环境"
+    },
+    {
+      "id": "reg-hklm-sam",
+      "kind": "registry",
+      "layer": 1,
+      "pattern": "hklm\\sam",
+      "match": "key_prefix",
+      "effect": "账户和密码数据库，系统最高机密，不能动。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了账户信息全没，系统没法登录"
+    },
+    {
+      "id": "reg-hklm-security",
+      "kind": "registry",
+      "layer": 1,
+      "pattern": "hklm\\security",
+      "match": "key_prefix",
+      "effect": "系统安全策略库，删了权限体系会崩。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了权限体系崩溃，系统无法正常启动"
+    },
+    {
+      "id": "reg-hklm-bcd",
+      "kind": "registry",
+      "layer": 1,
+      "pattern": "hklm\\bcd00000000",
+      "match": "key_prefix",
+      "effect": "开机的启动配置，删了电脑起不来。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了电脑起不来，需要修复引导"
+    },
+    {
+      "id": "reg-controlset",
+      "kind": "registry",
+      "layer": 1,
+      "pattern": "controlset",
+      "match": "key_contains",
+      "effect": "系统的控制集，驱动和服务都挂在这下面，不要动。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了驱动和服务的定义全没，系统无法启动"
+    },
+    {
+      "id": "reg-autostart",
+      "kind": "registry",
+      "layer": 2,
+      "pattern": "\\currentversion\\run",
+      "match": "key_contains",
+      "effect": "开机自启的入口，删之前先确认那个软件你还留着。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了那个软件不再开机自启，要用的时候得手动打开"
+    },
+    {
+      "id": "reg-uninstall-list",
+      "kind": "registry",
+      "layer": 2,
+      "pattern": "\\currentversion\\uninstall",
+      "match": "key_contains",
+      "effect": "已安装软件的登记表，删了软件会从列表里消失，但文件还占着盘。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了软件从卸载列表消失，但文件还占着盘，以后只能手动收拾"
+    },
+    {
+      "id": "reg-file-assoc",
+      "kind": "registry",
+      "layer": 2,
+      "pattern": "hkcr\\",
+      "match": "key_prefix",
+      "effect": "文件关联：双击某种文件用什么程序打开。删错会让文件打不开。",
+      "risk": "caution",
+      "source": "builtin",
+      "impact": "删了这类文件双击打不开，要重新指定用什么打开"
+    },
+    {
+      "id": "reg-services",
+      "kind": "registry",
+      "layer": 1,
+      "pattern": "hklm\\system\\currentcontrolset\\services",
+      "match": "key_prefix",
+      "effect": "系统服务定义，删了一个服务就没了，可能影响开机和硬件。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "删了对应服务消失，相关硬件或功能失效，可能开不了机"
+    },
+    {
+      "id": "proc-system",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "system",
+      "match": "name_exact",
+      "effect": "Windows 内核进程，结束它电脑立刻蓝屏。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "系统当场蓝屏，没保存的工作全丢"
+    },
+    {
+      "id": "proc-smss",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "smss.exe",
+      "match": "name_exact",
+      "effect": "会话管理器，系统启动的关键一步，动不得。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "系统启动链断掉，蓝屏或干脆开不了机"
+    },
+    {
+      "id": "proc-csrss",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "csrss.exe",
+      "match": "name_exact",
+      "effect": "管着控制台和窗口，结束它屏幕会直接黑掉。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "屏幕立刻黑掉，系统随后蓝屏重启"
+    },
+    {
+      "id": "proc-wininit",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "wininit.exe",
+      "match": "name_exact",
+      "effect": "开机时拉起一堆系统服务，结束了会重启。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "系统服务起不来，电脑重启"
+    },
+    {
+      "id": "proc-services",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "services.exe",
+      "match": "name_exact",
+      "effect": "所有系统服务的总管，结束它系统就瘫了。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "依赖服务的功能同时失效，系统跟着崩"
+    },
+    {
+      "id": "proc-lsass",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "lsass.exe",
+      "match": "name_exact",
+      "effect": "管登录和密码校验，结束它会强制重启。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "系统强制重启，没保存的工作全丢"
+    },
+    {
+      "id": "proc-winlogon",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "winlogon.exe",
+      "match": "name_exact",
+      "effect": "管登录会话，结束它会退回登录界面甚至重启。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "退回登录界面或直接重启，当前会话丢失"
+    },
+    {
+      "id": "proc-dwm",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "dwm.exe",
+      "match": "name_exact",
+      "effect": "桌面合成器，结束它整个界面会花掉。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "桌面显示花掉甚至黑屏，基本只能重启"
+    },
+    {
+      "id": "proc-svchost",
+      "kind": "process",
+      "layer": 1,
+      "pattern": "svchost.exe",
+      "match": "name_exact",
+      "effect": "系统服务的宿主进程，结束它可能让一堆功能失效。",
+      "risk": "forbidden",
+      "source": "builtin",
+      "impact": "依赖它的一批系统功能同时失效，可能断网或没法更新"
+    }
+  ]
+}
