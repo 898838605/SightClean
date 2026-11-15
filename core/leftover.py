@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import string
 import time
 import winreg
 from dataclasses import dataclass, field
@@ -158,12 +159,20 @@ def scan_shortcuts(name: str, publisher: str) -> list[Leftover]:
         return found
     home = os.environ.get("USERPROFILE", "")
     appdata = os.environ.get("APPDATA", "")
+    programdata = os.environ.get("PROGRAMDATA", "")
+    # 公共桌面和公共开始菜单不能写死 C 盘 —— 系统可能装在别的盘。
+    # %PUBLIC% 就是公共用户目录，%PROGRAMDATA% 跟着系统盘走。
+    public = os.environ.get("PUBLIC", "")
+    if not public and home:
+        public = os.path.join(os.path.dirname(home.rstrip("\\/")), "Public")
     roots = [
         ("桌面", os.path.join(home, "Desktop") if home else ""),
-        ("公共桌面", r"C:\Users\Public\Desktop"),
+        ("公共桌面", os.path.join(public, "Desktop") if public else ""),
         ("开始菜单", os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs")
          if appdata else ""),
-        ("公共开始菜单", r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs"),
+        ("公共开始菜单",
+         os.path.join(programdata, "Microsoft", "Windows", "Start Menu", "Programs")
+         if programdata else ""),
     ]
     seen: set[str] = set()
     for label, root in roots:
@@ -336,6 +345,21 @@ def scan_registry(name: str, publisher: str, install_location: str = "") -> list
     return found
 
 
+def _program_files_roots() -> tuple[str, ...]:
+    """所有盘上的 Program Files —— 不能只认 C 盘。"""
+    roots: list[str] = []
+    for env in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+        value = os.environ.get(env)
+        if value:
+            roots.append(value)
+    for letter in string.ascii_uppercase:
+        for name in ("Program Files", "Program Files (x86)"):
+            path = f"{letter}:\\{name}"
+            if os.path.isdir(path) and path not in roots:
+                roots.append(path)
+    return tuple(roots)
+
+
 def scan_orphans(roots=None, limit: int = 400) -> list[Leftover]:
     """Program Files 下那些在卸载列表里找不到对应登记的目录。
 
@@ -365,7 +389,7 @@ def scan_orphans(roots=None, limit: int = 400) -> list[Leftover]:
     skip_prefix = ("windows", "microsoft")
 
     found: list[Leftover] = []
-    for root in (roots or (r"C:\Program Files", r"C:\Program Files (x86)")):
+    for root in (roots or _program_files_roots()):
         if not os.path.isdir(root):
             continue
         try:

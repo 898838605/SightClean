@@ -420,11 +420,16 @@ def _likely_locks(path: str, limit: int = 3) -> list[str]:
     不保证准（文件被打开不等于 exe 在目录里），但比一句「可能被占用」有用得多 ——
     用户看到「chrome.exe」就知道该关什么。
     """
+    # 空路径必须先挡掉：os.path.abspath("") 会返回**当前工作目录**，
+    # 那样会把程序自己所在的目录当成目标，报出一个莫名其妙的占用者。
+    text = str(path or "").strip()
+    if not text:
+        return []
     try:
         import psutil
     except ImportError:
         return []
-    target = os.path.normcase(os.path.abspath(str(path or "")))
+    target = os.path.normcase(os.path.abspath(text))
     if not target:
         return []
     names: list[str] = []

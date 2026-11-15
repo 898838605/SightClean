@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import string
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -490,16 +491,14 @@ def find_orphans(installed, processes=None) -> list[ProcessItem]:
     #   Common Files  各厂商共用的组件（Adobe ARM、Macrovision 授权服务都在这儿）
     #   WindowsApps   商店应用（MSIX 安装的）
     #   Installer     MSI 缓存
-    shared_roots = (
-        os.path.normcase(os.path.join(os.environ.get("PROGRAMFILES", r"C:\Program Files"),
-                                      "Common Files")),
-        os.path.normcase(os.path.join(os.environ.get("PROGRAMFILES(X86)",
-                                                     r"C:\Program Files (x86)"),
-                                      "Common Files")),
-        os.path.normcase(os.path.join(windows, "Installer")),
-        os.path.normcase(r"C:\Program Files\WindowsApps"),
-        os.path.normcase(os.path.join(_program_files_x86(), "WindowsApps")),
-    )
+    # 不能只认 C 盘 —— 系统可能装在别的盘
+    shared_roots_list: list[str] = [os.path.normcase(os.path.join(windows, "Installer"))]
+    for letter in string.ascii_uppercase:
+        for name in ("Program Files", "Program Files (x86)"):
+            base = f"{letter}:\\{name}"
+            shared_roots_list.append(os.path.normcase(os.path.join(base, "Common Files")))
+            shared_roots_list.append(os.path.normcase(os.path.join(base, "WindowsApps")))
+    shared_roots = tuple(shared_roots_list)
 
     # 已装软件的名字碎片，用来兜住「安装路径没登记」的情况
     software_words: set[str] = set()
@@ -566,10 +565,15 @@ def _program_files_x86() -> str:
 
 
 def _under_program_files(exe: str) -> bool:
-    """这个 exe 是不是在某块盘的 Program Files 下。"""
-    for letter in "CDEFGHIJK":
-        for name in ("program files", "program files (x86)"):
-            root = os.path.normcase(f"{letter}:\\{name}")
-            if exe.startswith(root + os.sep):
-                return True
-    return False
+    """这个 exe 是不是在某块盘的 Program Files 下。
+
+    优先用环境变量（系统装在哪个盘就跟到哪个盘），再补上其他盘的可能性。
+    """
+    roots = [
+        os.path.normcase(os.environ.get(env, ""))
+        for env in ("PROGRAMFILES", "PROGRAMFILES(X86)")
+    ]
+    for letter in string.ascii_uppercase:
+        for name in ("Program Files", "Program Files (x86)"):
+            roots.append(os.path.normcase(f"{letter}:\\{name}"))
+    return any(root and root + os.sep and exe.startswith(root + os.sep) for root in roots)

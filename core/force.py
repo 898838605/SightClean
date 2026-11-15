@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import string
 from pathlib import Path
 
 from core.leftover import (
@@ -22,15 +23,36 @@ from core.leftover import (
     clean,
 )
 
-# 这些位置绝不「强制卸载」
-_PROTECTED_DIRS = (
-    r"C:\windows",
-    r"C:\program files",
-    r"C:\program files (x86)",
-    r"C:\programdata",
-    r"C:\users",
-    r"C:\users\public",
-)
+def _protected_dirs() -> tuple[str, ...]:
+    """这些位置绝不「强制卸载」。
+
+    **不能写死 C 盘** —— 系统可能装在 D 盘，用户目录也可能被挪到别的盘。
+    全部按环境变量和实际存在的盘符算出来，换台机器一样有效。
+    """
+    seen: list[str] = []
+
+    # 系统自己的位置，以环境变量为准
+    for env in ("WINDIR", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA", "PUBLIC"):
+        value = os.environ.get(env)
+        if value:
+            seen.append(value)
+
+    # 用户目录和公共目录
+    profile = os.environ.get("USERPROFILE")
+    if profile:
+        seen.append(profile)
+        parent = os.path.dirname(profile.rstrip("\\/"))
+        if parent:
+            seen.append(os.path.join(parent, "Public"))
+
+    # 每块盘上的系统级目录：盘符本身、Program Files、Users、ProgramData
+    for letter in string.ascii_uppercase:
+        seen.append(f"{letter}:")
+        for name in ("Program Files", "Program Files (x86)", "Users", "ProgramData"):
+            seen.append(f"{letter}:\\{name}")
+
+    return tuple(_norm(path) for path in seen if path)
+
 
 # 这些注册表位置绝不「强制卸载」
 _PROTECTED_KEYS = (
@@ -44,6 +66,9 @@ _PROTECTED_KEYS = (
 
 def _norm(path: str) -> str:
     return os.path.normcase(str(path or "").rstrip("\\/"))
+
+
+_PROTECTED_DIRS = _protected_dirs()
 
 
 def _to_full_key(key_path: str) -> str:
