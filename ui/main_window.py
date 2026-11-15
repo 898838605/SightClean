@@ -739,7 +739,7 @@ class MainWindow(QMainWindow):
         if not suspects:
             QMessageBox.information(
                 self, "没找到候选",
-                "这台机器上没发现「不属于任何已装软件」的注册表键。",
+                "这台电脑上没发现「不属于任何已装软件」的注册表键。",
             )
             return
 
@@ -861,7 +861,7 @@ class MainWindow(QMainWindow):
         if not suspects:
             QMessageBox.information(
                 self, "没找到候选",
-                "这台机器上没发现「不属于任何已装软件」的目录或注册表键。",
+                "这台电脑上没发现「不属于任何已装软件」的目录或注册表键。",
             )
             return
 
