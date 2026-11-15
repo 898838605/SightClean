@@ -36,6 +36,11 @@ from PySide6.QtWidgets import (
 )
 
 from app_paths import to_long
+
+# 「帮助」菜单里指向的两个地方
+GITHUB_URL = "https://github.com/898838605/SightClean"
+TUTORIAL_URL = "https://mp.weixin.qq.com/s/JKYaUpnryQ0Rn97V0So6aw"
+
 # 注意：core.ai_client（带 urllib/ssl）和 ui.dialogs 都不在启动路径上，
 # 一律在用到的地方再 import，别拖慢冷启动。
 from core.config import CacheStore, Settings, SettingsStore
@@ -428,6 +433,14 @@ class MainWindow(QMainWindow):
         self.act_settings.triggered.connect(self._open_settings)
         self.act_help = QAction("? 怎么用", self)
         self.act_help.triggered.connect(self._open_help)
+
+        self.act_github = QAction("🔗 项目地址", self)
+        self.act_github.setToolTip(GITHUB_URL)
+        self.act_github.triggered.connect(self._open_github)
+
+        self.act_tutorial = QAction("📖 教程", self)
+        self.act_tutorial.setToolTip(TUTORIAL_URL)
+        self.act_tutorial.triggered.connect(self._open_tutorial)
 
         # 只有文件模块用得到的按钮；切到别的模块时整组隐藏
         self._file_only_actions = (self.act_back, self.act_up, self.act_size, self.act_stop,
@@ -1003,6 +1016,9 @@ class MainWindow(QMainWindow):
         menu.addAction(self.act_settings)
         help_menu = menu.addMenu("帮助")
         help_menu.addAction(self.act_help)
+        help_menu.addSeparator()
+        help_menu.addAction(self.act_github)
+        help_menu.addAction(self.act_tutorial)
 
     # --------------------------------------------------------------- 启动
     def bootstrap(self) -> None:
@@ -1978,6 +1994,24 @@ class MainWindow(QMainWindow):
         from ui.dialogs import HelpDialog
 
         HelpDialog(self).exec()
+
+    def _open_url(self, url: str) -> None:
+        """用系统默认浏览器打开。打不开就说一声，别静默失败。"""
+        try:
+            ok = QDesktopServices.openUrl(QUrl(url))
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            QMessageBox.information(
+                self, "打不开浏览器",
+                f"没能调起系统浏览器。\n\n可以手动复制这个地址去看：\n{url}",
+            )
+
+    def _open_github(self) -> None:
+        self._open_url(GITHUB_URL)
+
+    def _open_tutorial(self) -> None:
+        self._open_url(TUTORIAL_URL)
 
     def _open_settings(self) -> None:
         from ui.dialogs import SettingsDialog
