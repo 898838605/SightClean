@@ -1,4 +1,4 @@
-"""删除作业：放进回收站、彻底删除、结果报告与记录留存。
+r"""删除作业：放进回收站、彻底删除、结果报告与记录留存。
 
 三条红线（破一条就会让用户丢数据）：
 1. 回收站放不进去时，绝不悄悄改成彻底删除 —— 用户以为还能找回来，结果找不回来，是最坏的事故。
@@ -20,9 +20,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, Signal
-
 from app_paths import to_human, to_long
+from core.tasks import Worker
 
 try:  # 万一打包时漏了这个包，下面还有直接叫系统干活的那条路
     from send2trash import send2trash as _send_to_trash
@@ -52,7 +51,6 @@ MAX_LOG_NAME_TRIES = 100
 # 给用户看的失败原因，全是人话
 ERR_DENIED = "系统不让删（可能被别的程序占用，或者需要管理员权限）"
 ERR_GONE = "这一项已经不在了"
-ERR_IN_USE = "正被别的程序用着，删不掉"
 ERR_UNKNOWN = "删不掉，原因不明"
 ERR_NO_RECYCLE = "放不进回收站，这一项没有删"
 ERR_NEED_ADMIN = "需要管理员权限（这个位置普通权限动不了）"
@@ -628,19 +626,14 @@ def purge_old_logs(log_dir: Path, keep_count: int = LOG_KEEP_COUNT) -> int:
 # --------------------------------------------------------------------------- #
 # 后台作业
 # --------------------------------------------------------------------------- #
-class DeleteWorker(QRunnable):
+class DeleteWorker(Worker):
     """一次删除作业：逐条删、逐条报进度，最后交一份完整报告。
 
     log_dir 用来留一份记录；记录写不进去也不影响删除结果本身。
     """
 
-    class Signals(QObject):
-        progress = Signal(int, int, str)   # 已完成数, 总数, 当前处理中的路径
-        finished = Signal(object)          # DeleteReport
-
     def __init__(self, items: list[DeleteItem], mode: Mode, log_dir: Path) -> None:
         super().__init__()
-        self.signals = DeleteWorker.Signals()
         self.items = list(items)
         try:
             self.mode = Mode(mode)
@@ -648,7 +641,7 @@ class DeleteWorker(QRunnable):
             self.mode = Mode.RECYCLE   # 认不出的方式一律按能找回的处理
         self.log_dir = Path(log_dir)
 
-    def run(self) -> None:
+    def work(self) -> DeleteReport:
         started = time.time()
         total = len(self.items)
         results: list[ItemResult] = []
@@ -683,4 +676,4 @@ class DeleteWorker(QRunnable):
             report.log_path = None
 
         self.signals.progress.emit(total, total, "")
-        self.signals.finished.emit(report)
+        return report

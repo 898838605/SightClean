@@ -12,7 +12,9 @@ from pathlib import Path
 
 APP_NAME = "SightClean"
 # 回退目录用 ASCII 名，避免个别环境下的编码问题
-FALLBACK_DIR_NAME = "DiskCleanupHelper"
+FALLBACK_DIR_NAME = APP_NAME
+# 老版本用的目录名：启动时先尝试迁移，迁不动就继续用老的，绝不丢配置
+LEGACY_FALLBACK_DIR_NAME = "DiskCleanupHelper"
 
 _LONG_PREFIX = "\\\\?\\"
 _UNC_PREFIX = "\\\\?\\UNC\\"
@@ -66,6 +68,24 @@ def resource_dir() -> Path:
     return Path(__file__).resolve().parent / "resources"
 
 
+def _fallback_root() -> Path:
+    """程序目录写不了时，数据放哪。
+
+    新版本统一放到 %LOCALAPPDATA%\\SightClean。老版本用的是
+    %LOCALAPPDATA%\\DiskCleanupHelper —— 第一次升级时尝试改名迁移；
+    改名失败（被占用、权限不够）就继续用老目录，保证配置不丢。
+    """
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    current = base / FALLBACK_DIR_NAME
+    legacy = base / LEGACY_FALLBACK_DIR_NAME
+    if not current.exists() and legacy.is_dir():
+        try:
+            legacy.rename(current)
+        except OSError:
+            return legacy
+    return current
+
+
 def _writable(directory: Path) -> bool:
     """真写一次才算数：只读介质、权限被挡、路径过长都要能识别出来。"""
     probe = directory / ".write-test"
@@ -97,8 +117,7 @@ def resolve() -> AppPaths:
     if _writable(base):
         root, portable = base, True
     else:
-        fallback = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / FALLBACK_DIR_NAME
-        root, portable = fallback, False
+        root, portable = _fallback_root(), False
     logs = root / "logs"
     try:
         logs.mkdir(parents=True, exist_ok=True)

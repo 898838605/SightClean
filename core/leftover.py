@@ -31,6 +31,8 @@ _UNINSTALL_PATHS = (
     (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", "HKCU"),
     (winreg.HKEY_LOCAL_MACHINE,
      r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM"),
+    (winreg.HKEY_CURRENT_USER,
+     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall", "HKCU"),
 )
 
 
@@ -611,59 +613,43 @@ def _dir_size(path: str, limit: int = 200_000) -> int:
 
 def make_measure_worker(items):
     """丢线程池算大小，界面先显示「计算中…」。"""
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from PySide6.QtCore import QObject, Signal
 
-    class Signals(QObject):
+    from core.tasks import Worker
+
+    class _Signals(QObject):
+        # 算大小只关心「几项 / 共几项」，不需要当前路径
         progress = Signal(int, int)
         finished = Signal(object)
 
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
+    class _Task(Worker):
+        Signals = _Signals
 
-        def run(self) -> None:
-            try:
-                sizes = measure_folders(
-                    items, progress=lambda done, total, _path: self.signals.progress.emit(done, total)
-                )
-            except Exception:  # noqa: BLE001
-                sizes = {}
-            try:
-                self.signals.finished.emit(sizes)
-            except RuntimeError:
-                pass
+        def work(self):
+            return measure_folders(
+                items, progress=lambda done, total, _path: self.signals.progress.emit(done, total)
+            )
 
     return _Task()
 
 
 def make_clean_worker(leftovers, log_dir: Path | str | None = None):
     """丢进线程池跑，界面靠信号刷进度。"""
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from core.tasks import Worker
 
-    class Signals(QObject):
-        progress = Signal(int, int, str)
-        finished = Signal(object)
-
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
-
-        def run(self) -> None:
+    class _Task(Worker):
+        def work(self):
             try:
-                report = clean(leftovers, log_dir,
-                               progress=lambda done, total, path: self.signals.progress.emit(done, total, path))
-            except Exception as exc:  # noqa: BLE001
+                return clean(
+                    leftovers, log_dir,
+                    progress=lambda done, total, path:
+                        self.signals.progress.emit(done, total, path),
+                )
+            except Exception as exc:  # noqa: BLE001 - 清理失败也要给界面一份完整报告
                 report = CleanReport(items=[
                     CleanResult(item, False, f"清理时出错：{exc}") for item in leftovers
                 ])
                 report.finished = time.time()
-            try:
-                self.signals.finished.emit(report)
-            except RuntimeError:
-                pass
+                return report
 
     return _Task()

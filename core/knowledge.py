@@ -82,16 +82,20 @@ MATCH_BY_KIND = {
 RISK_SAFE = "safe"
 RISK_CAUTION = "caution"
 RISK_FORBIDDEN = "forbidden"
-RISK_UNLISTED = "unlisted"     # 只用于「禁止级缺 impact」的降级结果
+# 未收录：知识库没覆盖，或「禁止级规则缺 impact」被降级。
+# 它不进 RISKS：用户自己写规则时只能写前三档，不能把规则标成「未收录」。
+RISK_UNLISTED = "unlisted"
 RISKS = (RISK_SAFE, RISK_CAUTION, RISK_FORBIDDEN)
-# 越往后越严格，folder_risk 取最严格一级
-RISK_RANK = {RISK_SAFE: 1, RISK_CAUTION: 2, RISK_FORBIDDEN: 3}
+# 越往后越严格，folder_risk 取最严格一级；未收录排最前，不参与升级
+RISK_RANK = {RISK_UNLISTED: 0, RISK_SAFE: 1, RISK_CAUTION: 2, RISK_FORBIDDEN: 3}
 
 SOURCE_BUILTIN = "builtin"
 SOURCE_USER = "user"
 
 UNLISTED_EFFECT = "未收录，建议确认后再删"
-UNLISTED_RISK = RISK_CAUTION
+# 数据层和展示层统一用 unlisted。调用方靠 known 判断是否收录，
+# 但即使只看 risk 字符串，也不会把「不知道」误当成黄色「看情况」。
+UNLISTED_RISK = RISK_UNLISTED
 
 _ENV_RE = re.compile(r"%([^%]+)%")
 
@@ -655,7 +659,7 @@ class KnowledgeBase:
         return worst, True, hints
 
     def folder_risk(self, path: str | os.PathLike[str]) -> str:
-        """契约函数：基于规则预判的文件夹风险等级（safe / caution / forbidden）。"""
+        """契约函数：基于规则预判的文件夹风险等级（safe / caution / forbidden / unlisted）。"""
         return self.folder_risk_detail(path)[0]
 
     @property

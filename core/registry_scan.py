@@ -108,18 +108,28 @@ def _subkeys(root):
 # --------------------------------------------------------------------------- #
 # 1. App Paths
 # --------------------------------------------------------------------------- #
-_APP_PATHS_PATHS = (
-    r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
-    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths",
+_APP_PATHS = (
+    (winreg.HKEY_LOCAL_MACHINE, "HKEY_LOCAL_MACHINE",
+     r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+    (winreg.HKEY_LOCAL_MACHINE, "HKEY_LOCAL_MACHINE",
+     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths"),
+    (winreg.HKEY_CURRENT_USER, "HKEY_CURRENT_USER",
+     r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+    (winreg.HKEY_CURRENT_USER, "HKEY_CURRENT_USER",
+     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths"),
 )
 
 
 def scan_app_paths() -> list[DeadEntry]:
-    """App Paths 下登记的 exe 已经不存在了。"""
+    """App Paths 下登记的 exe 已经不存在了。
+
+    和卸载登记一样，32 位视图直接写真实路径 WOW6432Node，不用 WOW64 标志，
+    这样扫出来的键路径能原样拿去删。
+    """
     found: list[DeadEntry] = []
-    for path in _APP_PATHS_PATHS:
+    for hive, hive_name, path in _APP_PATHS:
         try:
-            root = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ)
+            root = winreg.OpenKey(hive, path, 0, winreg.KEY_READ)
         except OSError:
             continue
         with root:
@@ -134,7 +144,7 @@ def scan_app_paths() -> list[DeadEntry]:
                 if _exists(default):
                     continue
                 found.append(DeadEntry(
-                    key_path=f"HKEY_LOCAL_MACHINE\\{path}\\{sub}",
+                    key_path=f"{hive_name}\\{path}\\{sub}",
                     value_name="",
                     label=sub,
                     reason="这个程序登记在 App Paths 里，但它指向的 exe 已经不在了",
@@ -258,6 +268,12 @@ _RUN_KEYS = (
      r"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"),
     (winreg.HKEY_LOCAL_MACHINE, "HKEY_LOCAL_MACHINE",
      r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"),
+    (winreg.HKEY_LOCAL_MACHINE, "HKEY_LOCAL_MACHINE",
+     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce"),
+    (winreg.HKEY_CURRENT_USER, "HKEY_CURRENT_USER",
+     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"),
+    (winreg.HKEY_CURRENT_USER, "HKEY_CURRENT_USER",
+     r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce"),
 )
 
 

@@ -326,11 +326,18 @@ def _ask(batch: list[Suspect], software_names: list[str], settings,
         "max_tokens": 1200,
     }
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    base = str(getattr(conf, "base_url", "") or "").rstrip("/")
+    # 和 ai_client 用同一套地址/超时规则：用户填了 /v1 也不能拼成 /v1/v1。
+    from core.ai_client import normalize_base_url
+
+    base = normalize_base_url(str(getattr(conf, "base_url", "") or ""))
+    try:
+        timeout = max(3.0, float(getattr(conf, "timeout_seconds", 15) or 15))
+    except (TypeError, ValueError):
+        timeout = 15.0
     request = urllib.request.Request(f"{base}/v1/chat/completions", data=payload, method="POST")
     request.add_header("Authorization", f"Bearer {getattr(conf, 'api_key', '') or ''}")
     request.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(request, timeout=90) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         raw = response.read()
     data = json.loads(raw.decode("utf-8", "replace"))
     content = data["choices"][0]["message"]["content"]

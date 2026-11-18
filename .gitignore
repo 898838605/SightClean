@@ -29,8 +29,6 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
-# tests
-tests/
 *.ps1
 # temp
 msg.txt

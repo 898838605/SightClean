@@ -121,11 +121,20 @@ class AIResult:
         }
 
 
-def _normalized_base(base_url: str) -> str:
+def normalize_base_url(base_url: str) -> str:
+    """去掉末尾斜杠和 /v1 —— 调用方统一拼 /v1/chat/completions。
+
+    用户可能填 https://api.deepseek.com，也可能照文档填 .../v1；
+    不统一的话后者会变成 /v1/v1/chat/completions。
+    """
     base = str(base_url or "").strip().rstrip("/")
     if base.lower().endswith("/v1"):
         base = base[:-3].rstrip("/")
     return base
+
+
+# 兼容旧调用；新代码用公开名字
+_normalized_base = normalize_base_url
 
 
 def mask_path(path: str) -> str:
@@ -434,7 +443,8 @@ class AIClient(QObject):
         self.busyChanged.emit(False)
 
     def shutdown(self) -> None:
-        self._closed = True
+        with self._lock:
+            self._closed = True
         self.cancel_all()
         self._wake.set()
         thread = self._thread
@@ -510,6 +520,9 @@ class AIClient(QObject):
             return True
 
         with self._lock:
+            if self._closed:
+                # shutdown() 可能刚好在进锁前发生；这时不能再把任务塞进已经清空的队列
+                return False
             for waiting in self._queue:
                 if waiting.human_path == path and waiting.cache_key == cache_key:
                     return False        # 已经在排队了，不重复问
@@ -538,12 +551,12 @@ class AIClient(QObject):
 
     def _take_task(self) -> _Task | None:
         with self._lock:
-            if not self._queue:
-                return None
-            task = self._queue.popleft()
-        if task.generation != self._generation:
-            return None      # 已经作废的批次，安静丢掉
-        return task
+            # 代次也在锁里比：取消批次时 generation 会和清空队列一起改
+            while self._queue:
+                task = self._queue.popleft()
+                if task.generation == self._generation:
+                    return task
+            return None      # 空队列，或只剩已经作废的批次
 
     def _stale(self, generation: int) -> bool:
         return generation != self._generation
@@ -601,8 +614,10 @@ class AIClient(QObject):
             self.busyChanged.emit(False)
 
     def _ensure_runner(self) -> None:
-        if self._thread is not None:
-            return
-        thread = _Runner(self)
+        # 两个线程同时入队时只能起一条干活线；先占住 _thread 再 start
+        with self._lock:
+            if self._thread is not None:
+                return
+            thread = _Runner(self)
+            self._thread = thread
         thread.start()
-        self._thread = thread

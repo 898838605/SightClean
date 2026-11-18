@@ -193,24 +193,22 @@ def sample_cpu(pids: Sequence[int], window: float = 0.3) -> dict[int, float]:
 
 def make_cpu_sampler(pids: Sequence[int]):
     """把采样丢到线程池，界面不会被这 0.3 秒卡住。"""
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from PySide6.QtCore import QObject, Signal
 
-    class Signals(QObject):
+    from core.tasks import Worker
+
+    class _Signals(QObject):
         ready = Signal(object)   # dict[pid, percent]
 
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
+    class _Task(Worker):
+        Signals = _Signals
 
-        def run(self) -> None:
+        def work(self):
+            return sample_cpu(pids)
+
+        def emit_finished(self, value) -> None:
             try:
-                samples = sample_cpu(pids)
-            except Exception:  # noqa: BLE001
-                samples = {}
-            try:
-                self.signals.ready.emit(samples)
+                self.signals.ready.emit(value)
             except RuntimeError:
                 pass
 
@@ -297,35 +295,20 @@ def write_log(report: ProcessReport, log_dir: Path) -> Path | None:
 
 def make_worker(pairs: Sequence[tuple[int, str]], log_dir: Path):
     """包成 QRunnable，丢线程池里跑，界面不卡。"""
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from core.tasks import Worker
 
-    class Signals(QObject):
-        progress = Signal(int, int, str)
-        finished = Signal(object)
-
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
-
-        def run(self) -> None:
+    class _Task(Worker):
+        def work(self):
             started = time.time()
             total = len(pairs)
             results = []
             for index, (pid, name) in enumerate(pairs):
-                try:
-                    self.signals.progress.emit(index, total, name)
-                except RuntimeError:
-                    return
+                self.signals.progress.emit(index, total, name)
                 results.append(kill_process(pid, name))
             report = ProcessReport(items=results, started=started, finished=time.time())
             report.log_path = write_log(report, log_dir)
-            try:
-                self.signals.progress.emit(total, total, "")
-                self.signals.finished.emit(report)
-            except RuntimeError:
-                pass
+            self.signals.progress.emit(total, total, "")
+            return report
 
     return _Task()
 # --------------------------------------------------------------------------- #

@@ -312,60 +312,28 @@ def clean(results, progress=None) -> CleanOutcome:
     return outcome
 def make_scan_worker(categories=None):
     """丢线程池扫，别卡界面。"""
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from core.tasks import Worker
 
-    class Signals(QObject):
-        progress = Signal(int, int, str)
-        finished = Signal(object)
-
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
-
-        def run(self) -> None:
-            try:
-                report = scan(
-                    categories,
-                    progress=lambda done, total, label:
-                        self.signals.progress.emit(done, total, label),
-                )
-            except Exception:  # noqa: BLE001
-                report = None
-            try:
-                self.signals.finished.emit(report)
-            except RuntimeError:
-                pass
+    class _Task(Worker):
+        def work(self):
+            return scan(
+                categories,
+                progress=lambda done, total, label:
+                    self.signals.progress.emit(done, total, label),
+            )
 
     return _Task()
 
 
 def make_clean_worker(results):
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from core.tasks import Worker
 
-    class Signals(QObject):
-        progress = Signal(int, int, str)
-        finished = Signal(object)
-
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
-
-        def run(self) -> None:
-            try:
-                outcome = clean(
-                    results,
-                    progress=lambda done, total, path:
-                        self.signals.progress.emit(done, total, path),
-                )
-            except Exception:  # noqa: BLE001
-                outcome = None
-            try:
-                self.signals.finished.emit(outcome)
-            except RuntimeError:
-                pass
+    class _Task(Worker):
+        def work(self):
+            return clean(
+                results,
+                progress=lambda done, total, path:
+                    self.signals.progress.emit(done, total, path),
+            )
 
     return _Task()

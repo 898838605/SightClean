@@ -539,29 +539,14 @@ def clean_keys(paths: Sequence[str], log_dir: Path) -> RegistryReport:
 
 def make_worker(paths: Sequence[str], log_dir: Path):
     """返回一个可直接丢进 QThreadPool 的 QRunnable：先备份，再清理。"""
-    from PySide6.QtCore import QObject, QRunnable, Signal
+    from core.tasks import Worker
 
-    class Signals(QObject):
-        progress = Signal(int, int, str)
-        finished = Signal(object)
-
-    class _Task(QRunnable):
-        def __init__(self) -> None:
-            super().__init__()
-            self.setAutoDelete(True)
-            self.signals = Signals()
-
-        def run(self) -> None:
+    class _Task(Worker):
+        def work(self):
             total = len(paths)
-            try:
-                self.signals.progress.emit(0, total, "正在备份…")
-            except RuntimeError:
-                return
+            self.signals.progress.emit(0, total, "正在备份…")
             report = clean_keys(paths, log_dir)
-            try:
-                self.signals.progress.emit(total, total, "")
-                self.signals.finished.emit(report)
-            except RuntimeError:
-                pass
+            self.signals.progress.emit(total, total, "")
+            return report
 
     return _Task()

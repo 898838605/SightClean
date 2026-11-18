@@ -82,7 +82,7 @@
   logs\               删除记录、启动耗时、出错记录
 
 说明：如果程序放在不允许写入的目录（比如 Program Files），上面这些文件会自动
-改放到 %LOCALAPPDATA%\DiskCleanupHelper\ 下面，界面上会提示一句。
+改放到 %LOCALAPPDATA%\SightClean\ 下面，界面上会提示一句。
 
 
 六、出问题了怎么办
