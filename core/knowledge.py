@@ -586,7 +586,7 @@ class KnowledgeBase:
         return _unlisted()
 
     def match_registry(self, key_path: str) -> MatchResult:
-        """按注册表键路径匹配 registry 类规则。
+        r"""按注册表键路径匹配 registry 类规则。
 
         比较前统一成小写 + 反斜杠；HKEY_LOCAL_MACHINE 这种长根名会先缩成 HKLM，
         这样规则里写 hklm\system 就够了，不用写全称。

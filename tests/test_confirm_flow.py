@@ -115,6 +115,22 @@ class NoGateTests(Base):
         dialog._mode_group.buttons()[1].setChecked(True)
         self.assertEqual(dialog.chosen_mode, "permanent")
 
+    def test_permanent_delete_requires_explicit_acknowledgement(self):
+        dialog = self.make(
+            [NORMAL],
+            modes=(("移入回收站", "recycle"), ("彻底删除", "permanent")),
+        )
+        permanent = dialog._mode_group.buttons()[1]
+        permanent.setChecked(True)
+        self.assertTrue(dialog.permanent_ack.isVisibleTo(dialog))
+        self.assertFalse(dialog.permanent_ack.isChecked())
+        self.assertFalse(dialog.btn_ok.isEnabled())
+        dialog.permanent_ack.setChecked(True)
+        self.assertTrue(dialog.btn_ok.isEnabled())
+        dialog._mode_group.buttons()[0].setChecked(True)
+        self.assertFalse(dialog.permanent_ack.isVisibleTo(dialog))
+        self.assertTrue(dialog.btn_ok.isEnabled())
+
 
 class LayoutTests(Base):
     """作用/后果两列必须能看全，方式选择必须显眼。"""

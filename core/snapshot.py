@@ -21,6 +21,7 @@ OP_LABELS = {
     "delete": "删除文件",
     "uninstall": "卸载软件",
     "clean": "清理注册表",
+    "leftover": "清理卸载残余",
     "kill": "结束进程",
 }
 
@@ -190,6 +191,9 @@ def finish(
         for result in results:
             key = str(getattr(result, "path", "") or getattr(result, "human_path", "") or
                       getattr(result, "identity", "") or getattr(result, "pid", "") or "")
+            if not key:
+                leftover = getattr(result, "leftover", None)
+                key = str(getattr(leftover, "path", "") or "")
             row = by_path.get(key)
             if row is None:
                 continue

@@ -50,6 +50,15 @@ class WorkerTests(unittest.TestCase):
     def test_auto_delete_enabled(self):
         self.assertTrue(self.make().autoDelete())
 
+    def test_call_worker_runs_function_and_returns_value(self):
+        from core.tasks import make_call_worker
+
+        received = []
+        worker = make_call_worker(lambda: 42)
+        worker.signals.finished.connect(received.append)
+        worker.run()
+        self.assertEqual(received, [42])
+
 
 if __name__ == "__main__":
     unittest.main()

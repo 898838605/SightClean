@@ -1,4 +1,4 @@
-"""卸载之后找残余：文件夹 + 注册表。
+r"""卸载之后找残余：文件夹 + 注册表。
 
 扫描**只读**，绝不在扫的时候改任何东西。清理是单独的动作，
 注册表必须先备份，而且走三道坎。
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import string
 import time
 import winreg
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.delete import DeleteItem, Mode, delete_one
+from core.path_safety import is_reparse_point, is_reparse_stat
 from core.registry import delete_key_tree, export_keys
 
 KIND_FOLDER = "folder"
@@ -70,6 +72,7 @@ class CleanReport:
     backup: Path | None = None
     started: float = field(default_factory=time.time)
     finished: float = 0.0
+    log_path: Path | None = None
 
     @property
     def ok_count(self) -> int:
@@ -487,6 +490,12 @@ def clean(leftovers, log_dir: Path | str | None = None, progress=None) -> CleanR
         report.finished = time.time()
         return report
 
+    from core import snapshot as snapshots
+
+    snapshot_id = snapshots.begin(
+        "leftover", targets, backup="", note="卸载残留/失效项清理", log_dir=log_dir,
+    ) if log_dir is not None else None
+
     def _tick(index: int, path: str) -> None:
         if progress is not None:
             try:
@@ -511,6 +520,9 @@ def clean(leftovers, log_dir: Path | str | None = None, progress=None) -> CleanR
                     progress(total, total, "")
                 except Exception:  # noqa: BLE001
                     pass
+            if log_dir is not None:
+                report.log_path = write_log(report, log_dir)
+                snapshots.finish(snapshot_id, report.items, log_dir)
             return report
         report.backup = backup
 
@@ -551,8 +563,25 @@ def clean(leftovers, log_dir: Path | str | None = None, progress=None) -> CleanR
             report.items.append(CleanResult(item, outcome.ok, outcome.error))
 
     report.finished = time.time()
+    if log_dir is not None:
+        report.log_path = write_log(report, log_dir)
+        snapshots.finish(
+            snapshot_id, report.items, log_dir,
+            backup=report.backup.name if report.backup is not None else "",
+        )
     _tick(total, "")
     return report
+
+
+def write_log(report: CleanReport, log_dir: Path | str) -> Path | None:
+    try:
+        directory = Path(log_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"卸载残余-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+        path.write_text(report.as_log_text(), encoding="utf-8")
+        return path
+    except (OSError, ValueError):
+        return None
 
 
 def measure_folders(items, progress=None) -> dict[str, int]:
@@ -586,6 +615,8 @@ def measure_folders(items, progress=None) -> dict[str, int]:
 
 def _dir_size(path: str, limit: int = 200_000) -> int:
     """自己数一遍，碰到链接就跳过（绝不顺着链接钻出去）。"""
+    if is_reparse_point(path):
+        return 0
     total = 0
     count = 0
     stack = [path]
@@ -598,12 +629,13 @@ def _dir_size(path: str, limit: int = 200_000) -> int:
                     if count > limit:
                         return total
                     try:
-                        if entry.is_symlink():
+                        info = entry.stat(follow_symlinks=False)
+                        if is_reparse_stat(info):
                             continue
-                        if entry.is_dir(follow_symlinks=False):
+                        if stat.S_ISDIR(info.st_mode):
                             stack.append(entry.path)
                         else:
-                            total += entry.stat(follow_symlinks=False).st_size
+                            total += info.st_size
                     except OSError:
                         continue
         except OSError:

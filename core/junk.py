@@ -16,11 +16,18 @@ from __future__ import annotations
 import glob
 import json
 import os
-import shutil
+import stat
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from app_paths import resource_dir
+from core.path_safety import (
+    is_reparse_point,
+    is_reparse_stat,
+    remove_reparse_point,
+    remove_tree,
+)
 
 
 @dataclass
@@ -78,6 +85,18 @@ class CleanOutcome:
     freed: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+    results: list["JunkItemResult"] = field(default_factory=list)
+    log_path: Path | None = None
+
+
+@dataclass
+class JunkItemResult:
+    path: str
+    name: str
+    ok: bool
+    size: int = 0
+    error: str | None = None
+    category: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -87,7 +106,7 @@ _RULES_CACHE: Path | None = None
 
 
 def rules_path() -> Path:
-    """优先用 exe 旁边那份（用户可以改），没有就用内置的。
+    r"""优先用 exe 旁边那份（用户可以改），没有就用内置的。
 
     注意不能拿 resource_dir() 的 parent —— 打包后那是临时解包目录
     （%TEMP%\_MEIxxxx），用户改的文件在 exe 旁边，读不到。
@@ -176,6 +195,8 @@ def _size_of(path: str, limit: int = 200_000) -> int:
 
 def _dir_stats(path: str, limit: int = 200_000) -> tuple[int, int]:
     """一次遍历同时数个数和大小。"""
+    if is_reparse_point(path):
+        return 0, 0
     count = 0
     size = 0
     stack = [path]
@@ -188,12 +209,13 @@ def _dir_stats(path: str, limit: int = 200_000) -> tuple[int, int]:
                     if count > limit:
                         return count, size
                     try:
-                        if entry.is_symlink():
+                        info = entry.stat(follow_symlinks=False)
+                        if is_reparse_stat(info):
                             continue
-                        if entry.is_dir(follow_symlinks=False):
+                        if stat.S_ISDIR(info.st_mode):
                             stack.append(entry.path)
                         else:
-                            size += entry.stat(follow_symlinks=False).st_size
+                            size += info.st_size
                     except OSError:
                         continue
         except OSError:
@@ -275,15 +297,30 @@ def scan(categories: list[JunkCategory] | None = None,
     return report
 
 
-def clean(results, progress=None) -> CleanOutcome:
+def clean(results, progress=None, log_dir: Path | str | None = None) -> CleanOutcome:
     """按类别清。删不掉的（正在被占用）跳过，最后如实报数。"""
     outcome = CleanOutcome()
-    planned: list[str] = []
+    planned: list[tuple[str, str]] = []
     for result in results:
-        planned.extend(_targets_of(result.category))
+        planned.extend(
+            (target, result.category.label)
+            for target in _targets_of(result.category)
+        )
+
+    from core import snapshot as snapshots
+
+    audit_items = [
+        JunkItemResult(path=path, name=os.path.basename(path.rstrip("\\/")) or path,
+                       ok=False, category=label)
+        for path, label in planned
+    ]
+    snapshot_id = snapshots.begin(
+        "delete", audit_items, mode="permanent",
+        note="一键垃圾清理（彻底删除）", log_dir=log_dir,
+    ) if log_dir is not None else None
 
     total = len(planned)
-    for index, target in enumerate(planned):
+    for index, (target, label) in enumerate(planned):
         if progress is not None:
             try:
                 progress(index, total, target)
@@ -294,21 +331,35 @@ def clean(results, progress=None) -> CleanOutcome:
         except OSError:
             size = 0
         try:
-            if os.path.isdir(target) and not os.path.islink(target):
-                shutil.rmtree(target)
+            if is_reparse_point(target):
+                # A junction/symlink is itself the junk item; never follow it.
+                remove_reparse_point(target)
+            elif os.path.isdir(target):
+                remove_tree(target)
             else:
                 os.remove(target)
             outcome.removed += 1
             outcome.freed += size
+            outcome.results.append(JunkItemResult(
+                path=target, name=os.path.basename(target.rstrip("\\/")) or target,
+                ok=True, size=size, category=label,
+            ))
         except OSError as exc:
             outcome.skipped += 1
             if len(outcome.errors) < 20:
                 outcome.errors.append(f"{os.path.basename(target) or target}：{exc}")
+            outcome.results.append(JunkItemResult(
+                path=target, name=os.path.basename(target.rstrip("\\/")) or target,
+                ok=False, size=size, error=str(exc), category=label,
+            ))
     if progress is not None:
         try:
             progress(total, total, "")
         except Exception:  # noqa: BLE001
             pass
+    if log_dir is not None:
+        outcome.log_path = _write_log(outcome, log_dir)
+        snapshots.finish(snapshot_id, outcome.results, log_dir)
     return outcome
 def make_scan_worker(categories=None):
     """丢线程池扫，别卡界面。"""
@@ -325,13 +376,39 @@ def make_scan_worker(categories=None):
     return _Task()
 
 
-def make_clean_worker(results):
+def _write_log(outcome: CleanOutcome, log_dir: Path | str) -> Path | None:
+    try:
+        directory = Path(log_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = directory / f"垃圾清理-{stamp}.txt"
+        lines = [
+            "SightClean · 一键垃圾清理记录",
+            f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"共 {len(outcome.results)} 项：成功 {outcome.removed}，跳过 {outcome.skipped}",
+            f"释放：{outcome.freed} 字节",
+            "",
+        ]
+        for result in outcome.results:
+            state = "成功" if result.ok else "跳过"
+            lines.append(
+                f"{state} | {result.category} | {result.size} | {result.path} | "
+                f"{result.error or '无'}"
+            )
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
+    except (OSError, ValueError):
+        return None
+
+
+def make_clean_worker(results, log_dir: Path | str | None = None):
     from core.tasks import Worker
 
     class _Task(Worker):
         def work(self):
             return clean(
                 results,
+                log_dir=log_dir,
                 progress=lambda done, total, path:
                     self.signals.progress.emit(done, total, path),
             )

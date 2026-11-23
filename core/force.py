@@ -71,8 +71,24 @@ def _norm(path: str) -> str:
 _PROTECTED_DIRS = _protected_dirs()
 
 
+def _protected_trees() -> tuple[str, ...]:
+    """Locations whose entire subtree must never be force-uninstalled."""
+    trees = []
+    for env in ("WINDIR", "SYSTEMROOT"):
+        value = os.environ.get(env)
+        if value:
+            trees.append(value)
+    system_drive = os.environ.get("SystemDrive")
+    if system_drive:
+        trees.append(os.path.join(system_drive + "\\", "Windows"))
+    return tuple(_norm(path) for path in trees if path)
+
+
+_PROTECTED_TREES = _protected_trees()
+
+
 def _to_full_key(key_path: str) -> str:
-    """把 HKLM64\SOFTWARE\... 这种内部分类转成注册表全名。"""
+    r"""把 HKLM64\SOFTWARE\... 这种内部分类转成注册表全名。"""
     text = str(key_path or "").strip()
     for short, full in (
         ("HKLM64", "HKEY_LOCAL_MACHINE"),
@@ -99,12 +115,17 @@ def is_protected(item) -> tuple[bool, str]:
         for guarded in _PROTECTED_DIRS:
             if location == _norm(guarded):
                 return False, f"「{item.install_location}」本身是系统目录，不能整个删"
+        for guarded in _PROTECTED_TREES:
+            if location == guarded or location.startswith(guarded + "\\"):
+                return False, f"「{item.install_location}」在 Windows 系统目录里，不能强制删除"
 
     key = _to_full_key(item.key_path).lower()
     if key.startswith("hkey_"):
         for guarded in _PROTECTED_KEYS:
             if key.rstrip("\\") == guarded:
                 return False, "这个键是系统/厂商的容器，不能整个删"
+        if "\\microsoft\\windows\\currentversion\\uninstall\\" not in key:
+            return False, "强制卸载只允许删除卸载登记键下的具体软件项"
 
     if not location and not key.startswith("hkey_"):
         return False, "既没有安装目录，也没有注册表键，没东西可删"

@@ -245,7 +245,7 @@ class JunkDialog(QDialog):
         self.status.setStyleSheet(f"color:{MUTED.name()};")
         self.status.setText("正在删…被占用的会自动跳过")
 
-        worker = make_clean_worker(chosen)
+        worker = make_clean_worker(chosen, self._log_dir())
         worker.signals.progress.connect(self._on_clean_progress)
         worker.signals.finished.connect(self._on_cleaned)
         self._clean_worker = worker
@@ -284,3 +284,20 @@ class JunkDialog(QDialog):
         if self._busy:
             return
         self.reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._busy:
+            self.status.setVisible(True)
+            self.status.setText("正在清理，完成前不能关闭")
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _log_dir(self):
+        parent = self.parent()
+        paths = getattr(parent, "paths", None)
+        if paths is not None and getattr(paths, "logs", None) is not None:
+            return paths.logs
+        from app_paths import resolve
+
+        return resolve().logs

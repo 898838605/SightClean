@@ -439,9 +439,10 @@ class CacheStore:
         entry = self._sizes.get(self.size_key(path))
         if not entry:
             return None
-        if ttl_hours > 0 and time.time() - float(entry.get("at", 0)) > ttl_hours * 3600:
-            return None
         try:
+            updated_at = float(entry.get("at", 0))
+            if ttl_hours > 0 and time.time() - updated_at > ttl_hours * 3600:
+                return None
             return int(entry["bytes"]), str(entry.get("state", "ok"))
         except (KeyError, TypeError, ValueError):
             return None

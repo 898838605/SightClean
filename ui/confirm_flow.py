@@ -1,7 +1,7 @@
 """确认清单：执行之前把要做的事列出来，让你逐项过一遍。
 
-**这里没有分级拦截。** 红色、黄色、灰色在列表里只是颜色，
-点「删除」时所有项一样处理 —— 不锁、不输入确认、不单独剔除。
+**风险等级本身不拦截。** 红色、黄色、灰色在列表里只是颜色；
+只有「彻底删除」这种不可逆方式会额外要求确认一次。
 
 保留的东西：
 - 逐项勾选（默认全勾，可以取消）
@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QHeaderView,
@@ -227,6 +228,12 @@ class ConfirmDialog(QDialog):
                 self._mode_group.button(index).toggled.connect(lambda _checked: self._refresh())
                 mode_layout.addWidget(radio)
 
+        self.permanent_ack = QCheckBox(
+            "我明白：彻底删除后文件不进回收站，无法撤销"
+        )
+        self.permanent_ack.setVisible(False)
+        self.permanent_ack.toggled.connect(self._refresh)
+
         buttons = QDialogButtonBox()
         self.btn_cancel = QPushButton("取消")
         self.btn_cancel.setDefault(True)
@@ -243,6 +250,7 @@ class ConfirmDialog(QDialog):
         layout.addWidget(table, 1)
         if self._mode_box is not None:
             layout.addWidget(self._mode_box)
+        layout.addWidget(self.permanent_ack)
         layout.addWidget(self.confirm_hint)
         layout.addWidget(buttons)
         self._refresh()
@@ -255,7 +263,11 @@ class ConfirmDialog(QDialog):
     def _refresh(self) -> None:
         chosen = self.chosen_items
         self.summary.setText(self._preflight_text(chosen))
-        self.btn_ok.setEnabled(bool(chosen))
+        requires_ack = self.chosen_mode == "permanent"
+        self.permanent_ack.setVisible(requires_ack)
+        self.btn_ok.setEnabled(
+            bool(chosen) and (not requires_ack or self.permanent_ack.isChecked())
+        )
 
     def _preflight_text(self, chosen: Sequence) -> str:
         unit = {"删除": "项", "卸载": "个", "清理": "个键", "结束": "个进程"}.get(self._action, "项")

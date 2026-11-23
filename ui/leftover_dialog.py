@@ -48,7 +48,8 @@ class LeftoverDialog(QDialog):
 
     def __init__(self, leftovers, parent=None, on_open_path=None,
                  title_text="卸载后剩下的东西", ai=None, installed=None,
-                 focus=None, kinds=("folder", "registry"), scopes=None) -> None:
+                 focus=None, kinds=("folder", "registry"), scopes=None,
+                 log_dir=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title_text)
         self.setMinimumSize(1040, 620)
@@ -61,7 +62,10 @@ class LeftoverDialog(QDialog):
         self._focus = focus       # 只关心这一个软件的痕迹
         self._kinds = tuple(kinds)  # 这个入口只找文件/只找注册表/两者都找
         self._scopes = list(scopes) if scopes else None   # 扫哪些位置
+        paths = getattr(parent, "paths", None)
+        self._log_dir = log_dir or getattr(paths, "logs", None)
         self._ai_worker = None
+        self._collect_worker = None
         self._ai_cancel = None
         self._worker = None
         self._busy = False
@@ -325,16 +329,51 @@ class LeftoverDialog(QDialog):
         """让 AI 判断「名字对不上的残留」。"""
         from PySide6.QtCore import QThreadPool
 
-        from core.ai_leftover import collect_suspects, make_judge_worker
+        from core.ai_leftover import collect_suspects
+        from core.tasks import make_call_worker
 
         if self._ai is None or not self._ai.is_configured():
             self.status.setVisible(True)
             self.status.setStyleSheet("color:#9a6700;")
             self.status.setText("AI 还没配好，先去「设置」里填上接口地址和密钥")
             return
-        suspects = collect_suspects(self._installed, focus=self._focus,
-                                    kinds=self._kinds, scopes=self._scopes)
+        self.btn_ai.setEnabled(False)
+        self.btn_ai.setText("正在收集候选…")
+        self.btn_close.setText("停止 AI")
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self.progress.setFormat("正在收集候选…")
+        self.status.setVisible(True)
+        self.status.setStyleSheet(f"color:{MUTED.name()};")
+        self.status.setText("正在找出不属于已装软件的文件和键…")
+        worker = make_call_worker(
+            lambda: collect_suspects(
+                self._installed, focus=self._focus,
+                kinds=self._kinds, scopes=self._scopes,
+            )
+        )
+        worker.signals.finished.connect(self._on_suspects_collected)
+        self._collect_worker = worker
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_suspects_collected(self, suspects) -> None:
+        from PySide6.QtCore import QThreadPool
+
+        from core.ai_leftover import make_judge_worker
+
+        self._collect_worker = None
+        if suspects is None:
+            self.btn_ai.setEnabled(True)
+            self.btn_ai.setText("🤖 让 AI 再找一遍漏掉的")
+            self.btn_close.setText("关闭")
+            self.progress.setVisible(False)
+            self.status.setText("收集候选时出了点问题，请稍后重试")
+            return
         if not suspects:
+            self.btn_ai.setEnabled(True)
+            self.btn_ai.setText("🤖 让 AI 再找一遍漏掉的")
+            self.btn_close.setText("关闭")
+            self.progress.setVisible(False)
             self.status.setVisible(True)
             self.status.setStyleSheet(f"color:{MUTED.name()};")
             if self._focus is not None:
@@ -376,6 +415,7 @@ class LeftoverDialog(QDialog):
         self._ai_cancel = None
         self.btn_ai.setEnabled(True)
         self.btn_ai.setText("🤖 让 AI 再找一遍漏掉的")
+        self.btn_close.setText("关闭")
         self.progress.setVisible(False)
 
         if error:
@@ -434,12 +474,24 @@ class LeftoverDialog(QDialog):
         self.status.setText("这次只找到注册表项，没有可打开的文件夹。")
 
     def _try_close(self) -> None:
+        if self._collect_worker is not None:
+            self.status.setVisible(True)
+            self.status.setText("正在收集候选，请稍等")
+            return
         if self._ai_worker is not None:
             self._cancel_ai()
             return
         if self._busy:
             return
         self.reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._busy or self._ai_worker is not None or self._collect_worker is not None:
+            self.status.setVisible(True)
+            self.status.setText("正在处理，完成前不能关闭")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _cancel_ai(self) -> None:
         """停止还在跑的 AI 判断。已经判断出来的结果留着。"""
@@ -469,7 +521,7 @@ class LeftoverDialog(QDialog):
         self.status.setStyleSheet(f"color:{MUTED.name()};")
         self.status.setText("正在清理…")
 
-        worker = make_clean_worker(chosen)
+        worker = make_clean_worker(chosen, self._log_dir)
         worker.signals.progress.connect(self._on_progress)
         worker.signals.finished.connect(self._on_cleaned)
         self._worker = worker

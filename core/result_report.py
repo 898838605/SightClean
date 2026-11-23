@@ -44,6 +44,8 @@ class ResultRow:
     category: str = ""
     retryable: bool = False
     size: int | None = None
+    create_time: float = 0.0
+    exe: str = ""
 
     @property
     def status_label(self) -> str:
@@ -106,12 +108,21 @@ def _exists_registry(path: str) -> bool:
     except (OSError, ValueError, ImportError):
         return False
 
-def _exists_process(pid) -> bool:
+def _exists_process(pid, create_time: float = 0.0, exe: str = "") -> bool:
     try:
         import psutil
 
-        return psutil.pid_exists(int(pid))
-    except (ImportError, ValueError, TypeError):
+        if not psutil.pid_exists(int(pid)):
+            return False
+        proc = psutil.Process(int(pid))
+        if create_time and abs(float(proc.create_time()) - float(create_time)) > 0.01:
+            return False
+        if exe and os.path.normcase(os.path.normpath(str(proc.exe() or ""))) != os.path.normcase(
+            os.path.normpath(exe)
+        ):
+            return False
+        return True
+    except Exception:  # noqa: BLE001 - 进程在检查期间退出或拒绝访问都当作不可重试
         return False
 
 def rows_from_report(report, op_type: str = "") -> list[ResultRow]:
@@ -136,6 +147,8 @@ def rows_from_report(report, op_type: str = "") -> list[ResultRow]:
             status=STATUS_OK if ok else STATUS_FAIL,
             error=str(error or ""),
             size=size if isinstance(size, int) and size > 0 else None,
+            create_time=float(getattr(item, "create_time", 0.0) or 0.0),
+            exe=str(getattr(item, "exe", "") or ""),
         )
         if not ok:
             row.category = classify(row.error)
@@ -149,7 +162,11 @@ def _still_there(op_type: str, item, path: str) -> bool:
     if op_type == "clean":
         return _exists_registry(path)
     if op_type == "kill":
-        return _exists_process(getattr(item, "pid", "") or path)
+        return _exists_process(
+            getattr(item, "pid", "") or path,
+            getattr(item, "create_time", 0.0),
+            getattr(item, "exe", ""),
+        )
     if op_type == "uninstall":
         # 软件还在不在没法用一次轻量调用确认，交给重试时再判断
         return True

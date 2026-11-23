@@ -240,6 +240,10 @@ class SoftwareModel(FilterMixin, QAbstractTableModel):
     def rows(self) -> list[SoftwareRow]:
         return self._rows
 
+    def all_items(self) -> list[SoftwareItem]:
+        """Every loaded software item, regardless of the active text filter."""
+        return [row.item for row in self._all_rows]
+
     def row_at(self, index: int) -> SoftwareRow | None:
         return self._rows[index] if 0 <= index < len(self._rows) else None
 
@@ -340,6 +344,8 @@ class UninstallView(ModulePage):
         self.model = SoftwareModel(self)
         self.model.checkedChanged.connect(self._on_checked_changed)
         self._worker = None
+        self._load_worker = None
+        self._force_worker = None
         self._loading = False
         # 卸载是异步的：调起外部程序就返回了，条目还在注册表里。
         # 所以过一会儿自动重刷，直到这些软件真的从列表消失。
@@ -350,6 +356,7 @@ class UninstallView(ModulePage):
         self._exe_cache: dict[str, list[str]] = {}
         self._poll_keys: set[str] = set()
         self._poll_left = 0
+        self._manual_scan_done = False
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2000)
         self._poll_timer.timeout.connect(self._poll_uninstalled)
@@ -441,7 +448,20 @@ class UninstallView(ModulePage):
             return
 
         self.statusMessage.emit(f"正在强制卸载 {item.name}…")
-        report = force_uninstall(item, self._log_dir())
+        from core.tasks import make_call_worker
+
+        worker = make_call_worker(lambda: force_uninstall(item, self._log_dir()))
+        worker.signals.finished.connect(
+            lambda report: self._force_finished(report, item)
+        )
+        self._force_worker = worker
+        QThreadPool.globalInstance().start(worker)
+
+    def _force_finished(self, report, item) -> None:
+        self._force_worker = None
+        if report is None:
+            QMessageBox.warning(self, "强制卸载失败", "后台任务没有返回结果。")
+            return
         if report.fail_count == 0:
             QMessageBox.information(self, "清完了", report.summary)
         else:
@@ -475,12 +495,41 @@ class UninstallView(ModulePage):
             # 后面所有刷新（包括卸载完那次）都被挡在门外 —— 表现就是「刷新没用」。
             self._loading = False
 
+    def activate(self) -> None:
+        self.refresh_async()
+
+    def refresh_async(self) -> None:
+        if self._loading:
+            return
+        from core.tasks import make_call_worker
+
+        self.filter_bar.set_pending("")
+        self.model.set_filter("")
+        self._loading = True
+        self.statusMessage.emit("正在读取已安装软件…")
+        worker = make_call_worker(lambda: enumerate_installed())
+        worker.signals.finished.connect(self._on_loaded)
+        self._load_worker = worker
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_loaded(self, loaded) -> None:
+        self._load_worker = None
+        self._loading = False
+        if loaded is None:
+            items, warnings = [], ["读取已安装软件时出了点问题"]
+        else:
+            items, warnings = loaded
+        self._apply_items(items, warnings)
+
     def _reload(self) -> None:
         """真正读注册表并重建列表。refresh() 负责加锁和复位。"""
         try:
             items, warnings = enumerate_installed()
         except Exception:  # noqa: BLE001 - 读注册表出意外也不能把页面搞崩
             items, warnings = [], ["读取已安装软件时出了点问题"]
+        self._apply_items(items, warnings)
+
+    def _apply_items(self, items, warnings) -> None:
         rows: list[SoftwareRow] = []
         for item in items:
             result = self.kb.match_software(item.name, item.publisher)
@@ -686,7 +735,7 @@ class UninstallView(ModulePage):
         from core import snapshot as snapshots
 
         self._remember_exe_names(rows)      # 卸载一跑目录就没了，先把 exe 名记下来
-        self._snap_id = snapshots.begin("uninstall", rows)
+        self._snap_id = snapshots.begin("uninstall", decision.items)
         worker = UninstallWorker(items, self._log_dir())
         worker.signals.progress.connect(self._on_progress)
         worker.signals.finished.connect(self._on_finished)
@@ -729,6 +778,11 @@ class UninstallView(ModulePage):
     def _on_finished(self, report: UninstallReport) -> None:
         from core import snapshot as snapshots
 
+        worker = self._worker
+        original_by_key = {
+            item.key_path: item
+            for item in getattr(worker, "items", [])
+        }
         snapshots.finish(getattr(self, "_snap_id", None), getattr(report, "items", []), self._log_dir())
         self._worker = None
         self.model.clear_checks()
@@ -743,18 +797,20 @@ class UninstallView(ModulePage):
             # 「知道了」换成「扫描卸载残余」：点它就直接扫，不等轮询
             on_scan=lambda: self._scan_after_report(report),
         )
+        self._manual_scan_done = False
         dialog.exec()
 
         # 调起只是「叫醒」卸载程序，它还在跑。现在扫出来的「残留」其实是没删完的完整目录，
         # 所以先盯着等它真的卸完，卸完那一刻再扫 —— 那时候剩下的才是真残留。
         ok_keys = [result.key_path for result in report.items if result.ok]
-        pending = []
-        for result in report.items:
-            if not result.ok:
-                continue
-            row = self.model.row_of(result.key_path)
-            if row >= 0:
-                pending.append(self.model.rows()[row].item)
+        if self._manual_scan_done:
+            self._pending_scan = []
+            return
+        pending = [
+            original_by_key[key]
+            for key in ok_keys
+            if key in original_by_key
+        ]
         self._pending_scan = pending
         self._start_uninstall_poll(ok_keys)
 
@@ -776,6 +832,7 @@ class UninstallView(ModulePage):
             if row >= 0:
                 softwares.append(self.model.rows()[row].item)
         self._pending_scan = []          # 手动扫过了，轮询那边不用再扫
+        self._manual_scan_done = True
         if softwares:
             self._scan_and_show(softwares)
 
@@ -802,10 +859,11 @@ class UninstallView(ModulePage):
 
         dialog = CleanDialog(
             found, self, on_open_path=self.openPathRequested.emit,
-            ai=self.ai, installed=[row.item for row in self.model.rows()],
+            ai=self.ai, installed=self.model.all_items(),
             focus=focus,
             # AI 再扫时用的是用户勾过的那批位置，不是默认那套
             scopes=list(self.settings.scan_scopes) or default_keys(),
+            log_dir=self._log_dir(),
         )
         dialog.exec()
         if dialog.report is not None:
@@ -854,6 +912,8 @@ class UninstallView(ModulePage):
 
     def _write_leftover_log(self, report) -> None:
         """残余清理也写一份记录，和卸载记录放一起。"""
+        if getattr(report, "log_path", None) is not None:
+            return
         import time as _time
 
         try:

@@ -55,12 +55,13 @@ class BuildItemTests(unittest.TestCase):
         self.assertIsNone(_build_item({}, "HKLM64", "k"))
         self.assertIsNone(_build_item({"DisplayName": "   "}, "HKLM64", "k"))
 
-    def test_quiet_wins_over_normal(self):
+    def test_normal_and_quiet_commands_stay_separate(self):
         item = _build_item(
             {"DisplayName": "甲", "UninstallString": "slow.exe", "QuietUninstallString": "quick.exe /S"},
             "HKLM64", "k",
         )
-        self.assertEqual(item.command, "quick.exe /S")
+        self.assertEqual(item.command, "slow.exe")
+        self.assertEqual(item.quiet_command, "quick.exe /S")
 
     def test_no_command_means_cannot_uninstall(self):
         item = _build_item({"DisplayName": "甲"}, "HKLM64", "k")
@@ -252,12 +253,13 @@ class MsiCommandTests(unittest.TestCase):
         item = self.make(uninstall_string=raw)
         self.assertEqual(item.command, raw)
 
-    def test_quiet_string_wins(self):
+    def test_quiet_string_stays_on_quiet_path(self):
         item = self.make(
             uninstall_string="MsiExec.exe /I{AAA}",
             quiet_uninstall_string="MsiExec.exe /X{AAA} /qn")
         self.assertIn("/X{AAA}", item.command)
-        self.assertIn("/qn", item.command)
+        self.assertNotIn("/qn", item.command)
+        self.assertIn("/qn", item.quiet_command)
 
     def test_synthesize_from_product_code(self):
         """没有 UninstallString，但键名是产品码 —— 要能拼出卸载命令。"""

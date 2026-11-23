@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,22 @@ class DirScanTests(unittest.TestCase):
         self.touch("sub/main.EXE")
         names = exe_names_from_dir(str(self.root))
         self.assertEqual(len([n for n in names if n.lower() == "main"]), 1)
+
+    def test_does_not_follow_junction(self):
+        outside = Path(tempfile.mkdtemp(prefix="exes-outside-"))
+        (outside / "Outside.exe").write_bytes(b"x")
+        link = self.root / "linked"
+        try:
+            created = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                capture_output=True,
+            )
+            if created.returncode != 0:
+                self.skipTest("这台机器不能创建 junction")
+            names = exe_names_from_dir(str(self.root))
+            self.assertNotIn("Outside", names)
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
 
 
 class IconFallbackTests(unittest.TestCase):

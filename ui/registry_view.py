@@ -628,7 +628,7 @@ class RegistryView(ModulePage):
         paths = [row.identity for row in decision.items]
         from core import snapshot as snapshots
 
-        self._snap_id = snapshots.begin("clean", rows)
+        self._snap_id = snapshots.begin("clean", decision.items)
         worker = make_worker(paths, self._log_dir())
         worker.signals.progress.connect(self._on_progress)
         worker.signals.finished.connect(self._on_finished)

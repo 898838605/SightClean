@@ -1,4 +1,4 @@
-"""BCU 路子上的全局残留扫描器。
+r"""BCU 路子上的全局残留扫描器。
 
 我们的老扫描只查「跟软件同名的目录」，扫不到这些散布在系统各处的东西：
 
@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import winreg
 
 from core.leftover import KIND_FOLDER, KIND_REGISTRY, Leftover
+from core.path_safety import is_reparse_stat
 
 WINDIR = os.environ.get("WINDIR", r"C:\Windows")
 PROGRAMDATA = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
@@ -64,19 +66,28 @@ def exe_names_from_dir(install_location: str, limit: int = 300, max_depth: int =
     if not folder or not os.path.isdir(folder):
         return []
     found: list[str] = []
-    base_depth = folder.rstrip("\\/").count("\\")
     try:
-        for root, dirs, files in os.walk(folder):
-            if root.count("\\") - base_depth >= max_depth:
-                dirs[:] = []
-            for name in files:
-                if not name.lower().endswith(".exe"):
-                    continue
-                stem = name[:-4].strip()
-                if stem and stem.lower() not in [item.lower() for item in found]:
-                    found.append(stem)
-                    if len(found) >= limit:
-                        return found
+        stack = [(folder, 0)]
+        while stack:
+            current, depth = stack.pop()
+            with os.scandir(current) as scanner:
+                for entry in scanner:
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    if stat.S_ISDIR(info.st_mode):
+                        if not is_reparse_stat(info) and depth < max_depth:
+                            stack.append((entry.path, depth + 1))
+                        continue
+                    name = entry.name
+                    if not name.lower().endswith(".exe"):
+                        continue
+                    stem = name[:-4].strip()
+                    if stem and stem.lower() not in [item.lower() for item in found]:
+                        found.append(stem)
+                        if len(found) >= limit:
+                            return found
     except OSError:
         pass
     return found
@@ -275,10 +286,8 @@ def scan_startup(names: list[str]) -> list[Leftover]:
                     break
                 index += 1
                 command = str(data or "")
-                exe = os.path.basename(
-                    command.strip().strip('"').split('"')[0].split(" ")[0].replace("/", "\\")
-                ).lower()
-                hit = exe.endswith(".exe") and exe[:-4] in wanted
+                executable = exe_names(command)
+                hit = any(name.lower() in wanted for name in executable)
                 if not hit:
                     # 值名本身可能就是软件名
                     hit = str(value_name).lower().replace(" ", "") in {

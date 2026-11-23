@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -94,6 +95,43 @@ class JudgeTests(unittest.TestCase):
         judged, error = ai_leftover.judge([], [], SimpleNamespace())
         self.assertEqual(judged, [])
         self.assertIsNone(error)
+
+    def test_batch_size_comes_from_settings(self):
+        from core.config import Settings
+
+        settings = Settings()
+        settings.ai.api_key = "k"
+        settings.ai.base_url = "http://x"
+        settings.ai.model = "m"
+        settings.ai.max_batch = 2
+        suspects = [
+            ai_leftover.Suspect("folder", "C:\\x\\%d" % i, "n%d" % i)
+            for i in range(5)
+        ]
+        calls = []
+
+        def fake_ask(batch, names, conf, focus=None):
+            calls.append(len(batch))
+            return batch
+
+        with mock.patch.object(ai_leftover, "_ask", fake_ask):
+            ai_leftover.judge(suspects, [], settings)
+        self.assertEqual(calls, [2, 2, 1])
+
+
+class FocusMaskTests(unittest.TestCase):
+    def test_focus_location_masks_username(self):
+        home = os.environ.get("USERPROFILE", "")
+        if not home:
+            self.skipTest("没有 USERPROFILE")
+        focus = SimpleNamespace(
+            name="HZVPN", publisher="IDTKL",
+            install_location=os.path.join(home, "Programs", "HZVPN"),
+            exe_names=["HZVPN"],
+        )
+        brief = ai_leftover._focus_brief(focus, mask_username=True)
+        self.assertIn("%USER%", brief)
+        self.assertNotIn(os.path.basename(home), brief)
 
 
 class SystemishTests(unittest.TestCase):

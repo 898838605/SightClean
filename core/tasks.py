@@ -47,3 +47,13 @@ class Worker(QRunnable):
             self.signals.finished.emit(value)
         except RuntimeError:
             pass
+
+
+def make_call_worker(func):
+    """Wrap a callable in the shared Worker contract."""
+
+    class _CallWorker(Worker):
+        def work(self):
+            return func()
+
+    return _CallWorker()

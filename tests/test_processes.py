@@ -621,3 +621,25 @@ class ProcessCleanDialogTests(unittest.TestCase):
             if label.text().startswith("开了 "):
                 self.assertEqual(label.sizePolicy().horizontalPolicy(),
                                  QSizePolicy.Fixed)
+
+    def test_idle_kill_writes_log_and_snapshot(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from PySide6.QtWidgets import QCheckBox
+        from core.processes import ProcessResult
+        from core import snapshot
+
+        with tempfile.TemporaryDirectory(prefix="idle-audit-") as tmp:
+            dialog = self.build_dialog()
+            dialog._log_dir = Path(tmp)
+            dialog.findChildren(QCheckBox)[0].setChecked(True)
+            def fake_kill(pid, name, **_kwargs):
+                return ProcessResult(pid, name, True, None, time.time())
+
+            with mock.patch("ui.process_clean_dialog.kill_process", side_effect=fake_kill):
+                dialog._do_kill()
+            records = snapshot.load_all(tmp)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].ok_count, 2)

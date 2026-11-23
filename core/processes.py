@@ -31,6 +31,7 @@ CRITICAL_NAMES = {
 CRITICAL_HINT = "结束可能导致系统蓝屏或立刻重启"
 
 ERR_GONE = "这个进程已经不在了"
+ERR_CHANGED = "PID 已被其他进程复用，原进程已经不在"
 ERR_DENIED = "没有权限结束它（用「工具 → 以管理员身份重新启动」再试）"
 ERR_UNKNOWN = "结束失败，原因不明"
 
@@ -67,6 +68,8 @@ class ProcessResult:
     ok: bool
     error: str | None = None
     at: float = 0.0
+    create_time: float = 0.0
+    exe: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -215,15 +218,32 @@ def make_cpu_sampler(pids: Sequence[int]):
     return _Task()
 
 
-def kill_process(pid: int, name: str = "") -> ProcessResult:
+def kill_process(
+    pid: int,
+    name: str = "",
+    expected_create_time: float = 0.0,
+    expected_exe: str = "",
+) -> ProcessResult:
     """先好好说（terminate），不听再动手（kill）。"""
     now = time.time()
     try:
         proc = psutil.Process(int(pid))
+        actual_create_time = float(proc.create_time())
+        actual_exe = str(proc.exe() or "")
     except psutil.NoSuchProcess:
         return ProcessResult(int(pid), name, False, ERR_GONE, now)
     except (psutil.Error, ValueError):
         return ProcessResult(int(pid), name, False, ERR_UNKNOWN, now)
+
+    if expected_create_time and abs(actual_create_time - float(expected_create_time)) > 0.01:
+        return ProcessResult(int(pid), name, False, ERR_CHANGED, now,
+                             actual_create_time, actual_exe)
+    if expected_exe:
+        if os.path.normcase(os.path.normpath(actual_exe)) != os.path.normcase(
+            os.path.normpath(str(expected_exe))
+        ):
+            return ProcessResult(int(pid), name, False, ERR_CHANGED, now,
+                                 actual_create_time, actual_exe)
 
     try:
         proc.terminate()
@@ -232,13 +252,17 @@ def kill_process(pid: int, name: str = "") -> ProcessResult:
         except psutil.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=1.5)
-        return ProcessResult(int(pid), name, True, None, now)
+        return ProcessResult(int(pid), name, True, None, now,
+                             actual_create_time, actual_exe)
     except psutil.AccessDenied:
-        return ProcessResult(int(pid), name, False, ERR_DENIED, now)
+        return ProcessResult(int(pid), name, False, ERR_DENIED, now,
+                             actual_create_time, actual_exe)
     except psutil.NoSuchProcess:
-        return ProcessResult(int(pid), name, False, ERR_GONE, now)
+        return ProcessResult(int(pid), name, False, ERR_GONE, now,
+                             actual_create_time, actual_exe)
     except (psutil.Error, OSError):
-        return ProcessResult(int(pid), name, False, ERR_UNKNOWN, now)
+        return ProcessResult(int(pid), name, False, ERR_UNKNOWN, now,
+                             actual_create_time, actual_exe)
 
 
 @dataclass
@@ -293,18 +317,28 @@ def write_log(report: ProcessReport, log_dir: Path) -> Path | None:
         return None
 
 
-def make_worker(pairs: Sequence[tuple[int, str]], log_dir: Path):
+def make_worker(items: Sequence, log_dir: Path):
     """包成 QRunnable，丢线程池里跑，界面不卡。"""
     from core.tasks import Worker
 
     class _Task(Worker):
         def work(self):
             started = time.time()
-            total = len(pairs)
+            total = len(items)
             results = []
-            for index, (pid, name) in enumerate(pairs):
+            for index, target in enumerate(items):
+                if isinstance(target, ProcessItem):
+                    pid = target.pid
+                    name = target.name
+                    create_time = target.create_time
+                    exe = target.exe
+                else:
+                    values = tuple(target)
+                    pid, name = values[0], values[1]
+                    create_time = values[2] if len(values) > 2 else 0.0
+                    exe = values[3] if len(values) > 3 else ""
                 self.signals.progress.emit(index, total, name)
-                results.append(kill_process(pid, name))
+                results.append(kill_process(pid, name, create_time, exe))
             report = ProcessReport(items=results, started=started, finished=time.time())
             report.log_path = write_log(report, log_dir)
             self.signals.progress.emit(total, total, "")

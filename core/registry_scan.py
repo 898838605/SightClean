@@ -52,7 +52,7 @@ _ICON_INDEX = re.compile(r",\s*-?\d+\s*$")
 
 
 def _exists(path: str) -> bool:
-    """这条路走不走得通。
+    r"""这条路走不走得通。
 
     三种写法都要认：
         C:\App\a.exe            完整路径

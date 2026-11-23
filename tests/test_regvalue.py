@@ -109,6 +109,26 @@ class StartupTests(unittest.TestCase):
         found = scan_startup(["完全不相干zzz"])
         self.assertFalse(any(self.tag in item.path for item in found))
 
+    def test_quoted_program_path_with_spaces(self):
+        import uuid
+
+        tag = "_dch_sp_" + uuid.uuid4().hex[:6]
+        value_name = "Startup_" + uuid.uuid4().hex[:6]
+        exe = rf"C:\Program Files\{tag}\{tag}.exe"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, self.RUN) as key:
+            winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ, '"' + exe + '" --min')
+        try:
+            found = scan_startup([tag])
+            self.assertTrue(any(item.name == value_name for item in found), found)
+        finally:
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER, self.RUN, 0, winreg.KEY_SET_VALUE,
+                ) as key:
+                    winreg.DeleteValue(key, value_name)
+            except OSError:
+                pass
+
 
 class RegisteredAppTests(unittest.TestCase):
     KEY = r"SOFTWARE\RegisteredApplications"

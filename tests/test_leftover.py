@@ -254,6 +254,17 @@ class CleanTests(unittest.TestCase):
         self.assertIn("清掉 1 项", report.summary)
         self.assertIn("卸载残余清理", report.as_log_text())
 
+    def test_clean_writes_operation_log_and_snapshot(self):
+        from core import snapshot
+
+        item = Leftover(KIND_REGISTRY, "软件配置", self.full, name=self.name)
+        report = clean([item], self.dir)
+        self.assertIsNotNone(report.log_path)
+        self.assertTrue(report.log_path.is_file())
+        records = snapshot.load_all(self.dir)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].ok_count, 1)
+
 
 class RepeatCleanTests(unittest.TestCase):
     """没勾的项清完之后还要能再清一次 —— 别一键就把路堵死。"""
@@ -520,12 +531,17 @@ class KindScopeTests(unittest.TestCase):
             shutil.rmtree(folder, ignore_errors=True)
 
     def test_ai_scan_uses_dialog_kinds(self):
+        import time
         from unittest import mock
 
         dialog, folder = self.make_dialog(("folder",))
         try:
             with mock.patch("core.ai_leftover.collect_suspects", return_value=[]) as spy:
                 dialog._do_ai()
+                end = time.time() + 2
+                while dialog._collect_worker is not None and time.time() < end:
+                    self.app.processEvents()
+                    time.sleep(0.01)
             self.assertTrue(spy.called, "AI 扫描没被触发起")
             self.assertEqual(spy.call_args.kwargs.get("kinds"), ("folder",),
                              "对话框必须沿用入口限定的范围")
@@ -535,12 +551,17 @@ class KindScopeTests(unittest.TestCase):
             shutil.rmtree(folder, ignore_errors=True)
 
     def test_registry_dialog_keeps_registry_scope(self):
+        import time
         from unittest import mock
 
         dialog, folder = self.make_dialog(("registry",))
         try:
             with mock.patch("core.ai_leftover.collect_suspects", return_value=[]) as spy:
                 dialog._do_ai()
+                end = time.time() + 2
+                while dialog._collect_worker is not None and time.time() < end:
+                    self.app.processEvents()
+                    time.sleep(0.01)
             self.assertEqual(spy.call_args.kwargs.get("kinds"), ("registry",))
         finally:
             import shutil

@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import re
+import os
+import shutil
 import subprocess
 import time
 import winreg
@@ -79,7 +81,7 @@ class SoftwareItem:
                 return f'winget uninstall --id "{package_id}" --accept-source-agreements'
             return ""
 
-        raw = (self.quiet_uninstall_string or self.uninstall_string or "").strip()
+        raw = (self.uninstall_string or self.quiet_uninstall_string or "").strip()
         if raw:
             return _msi_uninstall_switch(raw)
         if self.msi_code:
@@ -155,7 +157,7 @@ class SoftwareItem:
 
     @property
     def steam_app_id(self) -> str:
-        """Steam 游戏的 appid，从安装路径里抠（...\steamapps\common\<名字> 推不出来，只能靠 manifest）。"""
+        r"""Steam 游戏的 appid，从安装路径里抠（...\steamapps\common\<名字> 推不出来，只能靠 manifest）。"""
         return ""
 
     @property
@@ -310,13 +312,37 @@ def start_uninstall(item: SoftwareItem) -> UninstallResult:
     command = item.command
     if not command:
         return UninstallResult(item.key_path, item.name, False, "", ERR_NO_COMMAND, now)
+    if not _command_is_available(command, item.install_location):
+        return UninstallResult(item.key_path, item.name, False, command, ERR_START_FAILED, now)
     try:
         # 注册表里的卸载命令是「一整行带引号的命令行」，只能交给 shell 去解析。
         # 内容来自本机注册表，不是外部输入。
         subprocess.Popen(command, shell=True)  # noqa: S602
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return UninstallResult(item.key_path, item.name, False, command, ERR_START_FAILED, now)
     return UninstallResult(item.key_path, item.name, True, command, None, now)
+
+
+def _command_is_available(command: str, install_location: str = "") -> bool:
+    """Check the program portion before handing the command line to cmd.exe."""
+    from core.installers import _exe_of
+
+    text = str(command or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith(("steam://", "http://", "https://")):
+        return True
+    executable = os.path.expandvars(_exe_of(text).strip().strip('"'))
+    if not executable:
+        return False
+    if re.match(r"^[a-zA-Z]:", executable) or executable.startswith("\\\\"):
+        return os.path.isfile(executable)
+    if install_location:
+        local = os.path.join(os.path.expandvars(install_location), executable)
+        if os.path.isfile(local):
+            return True
+    return shutil.which(executable) is not None
 
 @dataclass
 class UninstallReport:

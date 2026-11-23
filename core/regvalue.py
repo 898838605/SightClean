@@ -1,4 +1,4 @@
-"""注册表「单个值」的删除与备份。
+r"""注册表「单个值」的删除与备份。
 
 AppCompatFlags 这类地方的残留是**值**不是键：
     [HKCU\...\AppCompatFlags\Layers]

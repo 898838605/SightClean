@@ -198,6 +198,30 @@ class CleanTests(unittest.TestCase):
         self.assertEqual(outcome.removed, 1, outcome.errors)
         self.assertFalse(target.exists())
 
+    def test_clean_writes_log_and_snapshot(self):
+        from core import snapshot
+
+        with tempfile.TemporaryDirectory(prefix="junk-audit-") as tmp:
+            root = Path(tmp) / "target"
+            logs = Path(tmp) / "logs"
+            root.mkdir()
+            target = root / "cache.tmp"
+            target.write_bytes(b"x")
+            category = junk.JunkCategory(
+                id="t", label="测试", purpose="p", detail="", risk="safe",
+                mode="contents", paths=[str(root)],
+            )
+            outcome = junk.clean(
+                [junk.CategoryResult(category=category, count=1, size=1)],
+                log_dir=logs,
+            )
+            self.assertFalse(target.exists())
+            self.assertIsNotNone(outcome.log_path)
+            self.assertTrue(outcome.log_path.is_file())
+            records = snapshot.load_all(logs)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].ok_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

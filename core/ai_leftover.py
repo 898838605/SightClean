@@ -1,4 +1,4 @@
-"""让 AI 帮忙找「名字对不上」的残留。
+r"""让 AI 帮忙找「名字对不上」的残留。
 
 我们的扫描器有个根本盲区：只会拿「已知软件的名字」去找同名目录。
 可现实里目录名经常跟软件名对不上 ——
@@ -36,7 +36,7 @@ SYSTEM_WORDS = (
 
 # COM 组件、安装器、更新包都用 GUID 命名 —— 那不是「软件」，别丢给 AI
 def _classes_noise(name: str) -> bool:
-    """SOFTWARE\Classes 下一大半是文件关联和 COM 注册，跟「哪个软件的残留」无关。
+    r"""SOFTWARE\Classes 下一大半是文件关联和 COM 注册，跟「哪个软件的残留」无关。
 
     只留像软件名的（厂商名、应用名）；扩展名关联（.txt）、CLSID、TypeLib、
     SystemFileAssociations 这些整片跳过 —— 不然候选会被它们淹掉。
@@ -166,13 +166,17 @@ def _focus_tokens(focus) -> tuple[set[str], str]:
     return tokens, os.path.normcase(folder) if folder else ""
 
 
-def _focus_brief(focus) -> str:
+def _focus_brief(focus, mask_username: bool = True) -> str:
     """把「当前这个软件」写成一段话，交给 AI 当判断依据。"""
     if focus is None:
         return ""
     name = str(getattr(focus, "name", "") or "").strip()
     publisher = str(getattr(focus, "publisher", "") or "").strip()
     location = str(getattr(focus, "install_location", "") or "").strip()
+    if location and mask_username:
+        from core.ai_client import mask_path
+
+        location = mask_path(location)
     exes = [str(x) for x in (getattr(focus, "exe_names", []) or []) if x]
     lines = [f"这次是在卸载「{name}」之后找它留下的残余。",
              f"- 软件名：{name}"]
@@ -307,7 +311,9 @@ def _ask(batch: list[Suspect], software_names: list[str], settings,
     lines = []
     for index, suspect in enumerate(batch, 1):
         lines.append(f"{index}. [{suspect.kind}] {suspect.name}　（来路：{suspect.source}）")
-    brief = _focus_brief(focus)
+    conf = _ai_conf(settings)
+    masked = bool(getattr(conf, "mask_username", True))
+    brief = _focus_brief(focus, mask_username=masked)
     user_text = (
         (brief + "\n\n" if brief else "")
         + f"这台电脑上**仍然装着**的软件，共 {len(software_names)} 个：\n"
@@ -315,7 +321,6 @@ def _ask(batch: list[Suspect], software_names: list[str], settings,
         "候选（判断时请逐个对照上面的清单，清单里已有的就是还装着的，不该判成残留）：\n"
         + "\n".join(lines)
     )
-    conf = _ai_conf(settings)
     body = {
         "model": getattr(conf, "model", "") or "",
         "messages": [
@@ -433,12 +438,17 @@ def judge(suspects: list[Suspect], installed, settings,
     """分批问 AI。返回 (带判断的候选, 错误信息)。"""
     if not suspects:
         return [], None
+    conf = _ai_conf(settings)
+    try:
+        batch_size = max(1, int(getattr(conf, "max_batch", BATCH_SIZE) or BATCH_SIZE))
+    except (TypeError, ValueError):
+        batch_size = BATCH_SIZE
     names = installed_names(installed)
     judged: list[Suspect] = []
-    for index in range(0, len(suspects), BATCH_SIZE):
+    for index in range(0, len(suspects), batch_size):
         if cancel is not None and cancel.is_set():
             return judged, "已停止"     # 用户点了停止，剩下的批次不再发
-        batch = suspects[index:index + BATCH_SIZE]
+        batch = suspects[index:index + batch_size]
         if progress is not None:
             try:
                 progress(len(judged), len(suspects))

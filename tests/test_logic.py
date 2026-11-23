@@ -32,8 +32,8 @@ def rule(rule_id: str, layer: int, pattern: str, match: str, risk: str,
 
 class PathToolTests(unittest.TestCase):
     def test_normalize(self):
-        self.assertEqual(normalize_path(r"C:\Windows"), "c:\windows")
-        self.assertEqual(normalize_path("C:/Windows/"), "c:\windows")
+        self.assertEqual(normalize_path(r"C:\Windows"), r"c:\windows")
+        self.assertEqual(normalize_path("C:/Windows/"), r"c:\windows")
         self.assertEqual(normalize_path("C:\\"), "c:\\")
 
     def test_extension(self):

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -35,7 +36,7 @@ CAUTION = QColor("#9a6700")
 
 class ProcessCleanDialog(QDialog):
     def __init__(self, orphans, parent=None, max_cpu: float = 1.0,
-                 min_age_minutes: float = 30) -> None:
+                 min_age_minutes: float = 30, log_dir: Path | str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("清理空闲进程")
         self.setMinimumSize(860, 620)
@@ -44,6 +45,8 @@ class ProcessCleanDialog(QDialog):
         self._boxes: dict[str, QCheckBox] = {}
         self.killed = 0
         self.failed = 0
+        paths = getattr(parent, "paths", None)
+        self._log_dir = log_dir or getattr(paths, "logs", None)
 
         total = sum(len(group) for _exe, group in self._groups)
 
@@ -156,14 +159,32 @@ class ProcessCleanDialog(QDialog):
         picked = self._chosen()
         if not picked:
             return
+        from core import snapshot as snapshots
+        from core.processes import ProcessReport, write_log
+
+        snapshot_id = snapshots.begin(
+            "kill", picked, note="一键清理空闲进程", log_dir=self._log_dir,
+        ) if self._log_dir is not None else None
         self.killed = 0
         self.failed = 0
+        results = []
         for proc in picked:
             # kill_process 收的是 pid 和名字，不是整个对象
-            if kill_process(proc.pid, proc.name).ok:
+            result = kill_process(
+                proc.pid, proc.name,
+                expected_create_time=proc.create_time,
+                expected_exe=proc.exe,
+            )
+            results.append(result)
+            if result.ok:
                 self.killed += 1
             else:
                 self.failed += 1
+
+        if self._log_dir is not None:
+            report = ProcessReport(items=results, started=self._now, finished=time.time())
+            report.log_path = write_log(report, Path(self._log_dir))
+            snapshots.finish(snapshot_id, results, self._log_dir)
 
         bits = [f"结束 {self.killed} 个"]
         if self.failed:

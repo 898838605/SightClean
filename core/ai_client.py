@@ -21,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Sequence
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Signal
 
 from core.config import CacheStore, Settings
 
@@ -304,26 +304,29 @@ def _ask_service(task: _Task) -> AIResult:
     )
 
 
-class _Runner(QThread):
+class _Runner(threading.Thread):
     """一条常驻的干活线：一次只处理一条，排队来；没活就歇着。"""
 
     def __init__(self, client: "AIClient") -> None:
-        super().__init__()
+        super().__init__(name="sightclean-ai", daemon=True)
         self._client = client
 
     def run(self) -> None:
-        while True:
-            task = self._client._take_task()
-            if task is None:
-                if self._client._closed:
-                    return
-                self._client._wake.wait(0.5)
-                self._client._wake.clear()
-                continue
-            try:
-                self._client._handle(task)
-            except BaseException:
-                self._client._settle(task.human_path, False)
+        try:
+            while True:
+                task = self._client._take_task()
+                if task is None:
+                    if self._client._closed:
+                        return
+                    self._client._wake.wait(0.5)
+                    self._client._wake.clear()
+                    continue
+                try:
+                    self._client._handle(task)
+                except BaseException:
+                    self._client._settle(task.human_path, False)
+        finally:
+            self._client._runner_finished(self)
 
 
 class AIClient(QObject):
@@ -411,8 +414,16 @@ class AIClient(QObject):
             self.failed.emit("", ERR_NOT_CONFIGURED)
             return 0
         extra_list = list(extras or [])
+        unique_items = []
+        seen = set()
+        for path, name in items:
+            key = (str(item_type or "file").lower(), path, name)
+            if key not in seen:
+                seen.add(key)
+                unique_items.append((path, name))
+        items = unique_items
         with self._lock:
-            self._batch_total = 0
+            self._batch_total = len(items)
             self._batch_done = 0
             self._batch_ok = 0
             self._batch_fail = 0
@@ -421,15 +432,6 @@ class AIClient(QObject):
             extra = extra_list[position] if position < len(extra_list) else None
             if self._enqueue(path, name, count_batch=True, item_type=item_type, extra=extra):
                 queued += 1
-        with self._lock:
-            self._batch_total = max(queued, 0)
-            total = self._batch_total
-            done = self._batch_done
-        if total and done >= total:
-            # 全部命中本地记录，不用真的发请求
-            self.batchFinished.emit(self._batch_ok, self._batch_fail)
-            with self._lock:
-                self._batch_total = 0
         return queued
 
     def cancel_all(self) -> None:
@@ -447,11 +449,10 @@ class AIClient(QObject):
             self._closed = True
         self.cancel_all()
         self._wake.set()
-        thread = self._thread
-        if thread is not None:
-            thread.quit()
-            thread.wait(SHUTDOWN_WAIT_MS)
-            self._thread = None
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(SHUTDOWN_WAIT_MS / 1000.0)
 
     # -- 内部 --------------------------------------------------------------
     def _settings_snapshot(self):
@@ -598,6 +599,7 @@ class AIClient(QObject):
                 if finished:
                     self._batch_total = 0
                     self._batch_done = 0
+                    self._busy = bool(self._queue)
                 idle = finished and not self._queue
             else:
                 self._busy = bool(self._queue)
@@ -621,3 +623,8 @@ class AIClient(QObject):
             thread = _Runner(self)
             self._thread = thread
         thread.start()
+
+    def _runner_finished(self, runner: _Runner) -> None:
+        with self._lock:
+            if self._thread is runner:
+                self._thread = None

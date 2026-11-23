@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         self._pending_sizes: set[str] = set()
         self._worker = None          # DeleteWorker 是懒加载的，注解别引用它
         self._busy = False
+        self._background_workers: set = set()
         # 以管理员身份重启之后，之前那些「打不开」的文件夹现在可能能读了，
         # 所以第一次进目录时不看缓存，全部重算一遍。
         self.force_recalc = False
@@ -371,7 +372,7 @@ class MainWindow(QMainWindow):
         import time as _time
 
         view = getattr(self, "software_page", None)
-        loaded = [row.item for row in view.model.rows()] if view is not None else []
+        loaded = view.model.all_items() if view is not None else []
         if loaded:
             return loaded
 
@@ -396,20 +397,17 @@ class MainWindow(QMainWindow):
 
     def clean_orphan_processes(self) -> None:
         """找出开了很久、不在前台、CPU 也不动的进程，让用户决定停不停。"""
-        from core.processes import (
-            DEFAULT_MAX_CPU,
-            DEFAULT_MIN_AGE_MINUTES,
-            find_idle_processes,
-        )
-        from ui.process_clean_dialog import ProcessCleanDialog
+        from core.processes import find_idle_processes
 
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            orphans = find_idle_processes()
-        except Exception:  # noqa: BLE001
-            orphans = []
-        finally:
-            QApplication.restoreOverrideCursor()
+        self._run_background(
+            "正在查找空闲进程…",
+            lambda: find_idle_processes(),
+            self._show_idle_processes,
+        )
+
+    def _show_idle_processes(self, orphans) -> None:
+        from core.processes import DEFAULT_MAX_CPU, DEFAULT_MIN_AGE_MINUTES
+        from ui.process_clean_dialog import ProcessCleanDialog
 
         if not orphans:
             QMessageBox.information(
@@ -424,11 +422,12 @@ class MainWindow(QMainWindow):
             orphans, self,
             max_cpu=DEFAULT_MAX_CPU,
             min_age_minutes=DEFAULT_MIN_AGE_MINUTES,
+            log_dir=self.paths.logs,
         )
         dialog.exec()
         if dialog.killed:
             self._toast(f"结束 {dialog.killed} 个进程")
-            self.process_page.refresh()
+            self.process_page.refresh_async()
 
     def open_junk_cleaner(self) -> None:
         """一键清理 C 盘垃圾。"""
@@ -445,15 +444,15 @@ class MainWindow(QMainWindow):
     def scan_dead_registry(self) -> None:
         """找「指向的东西已经不存在」的注册表项，交给用户勾选后清理。"""
         from core.registry_scan import scan_all
-        from ui.leftover_dialog import LeftoverDialog
 
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            entries = scan_all()
-        except Exception:  # noqa: BLE001
-            entries = []
-        finally:
-            QApplication.restoreOverrideCursor()
+        self._run_background(
+            "正在扫描失效注册表项…",
+            lambda: scan_all(),
+            self._show_dead_registry,
+        )
+
+    def _show_dead_registry(self, entries) -> None:
+        from ui.leftover_dialog import LeftoverDialog
 
         if not entries:
             QMessageBox.information(
@@ -510,8 +509,7 @@ class MainWindow(QMainWindow):
 
     def scan_registry_leftovers(self) -> None:
         """注册表版：找「不属于任何已装软件」的键，交给 AI 判断。"""
-        from core.ai_leftover import collect_suspects, make_judge_worker
-        from ui.leftover_dialog import LeftoverDialog
+        from core.ai_leftover import collect_suspects
 
         view = getattr(self, "software_page", None)
         ai = self.ai or getattr(view, "ai", None)
@@ -522,7 +520,24 @@ class MainWindow(QMainWindow):
             )
             return
 
-        installed = self._installed_for_ai()
+        def collect():
+            installed = view.model.all_items() if view is not None else []
+            if not installed:
+                from core.uninstall import enumerate_installed
+
+                installed, _warnings = enumerate_installed(include_orphans=False)
+            return installed, collect_suspects(installed, kinds=("registry",))
+
+        self._run_background(
+            "正在收集注册表候选…",
+            collect,
+            lambda data: self._confirm_registry_leftovers(ai, data[0], data[1]),
+        )
+
+    def _confirm_registry_leftovers(self, ai, installed, suspects) -> None:
+        from core.ai_leftover import make_judge_worker
+        from ui.leftover_dialog import LeftoverDialog
+
         if not installed:
             QMessageBox.information(
                 self, "读不到已装软件",
@@ -532,7 +547,6 @@ class MainWindow(QMainWindow):
             )
             return
 
-        suspects = collect_suspects(installed, kinds=("registry",))
         if not suspects:
             QMessageBox.information(
                 self, "没找到候选",
@@ -540,11 +554,12 @@ class MainWindow(QMainWindow):
             )
             return
 
+        batch_size = max(1, int(getattr(ai.settings.ai, "max_batch", 25) or 25))
         answer = QMessageBox.question(
             self,
             "要扫了吗",
             f"找到 {len(suspects)} 个注册表键，都不属于任何已装软件。\n\n"
-            f"接下来会分 {(len(suspects) + 24) // 25} 批交给 AI 判断，"
+            f"接下来会分 {(len(suspects) + batch_size - 1) // batch_size} 批交给 AI 判断，"
             "需要一点时间，也会消耗 token。\n"
             "判断结果只是建议，默认一个都不勾，删什么还是你说了算。",
             QMessageBox.Yes | QMessageBox.No,
@@ -634,8 +649,7 @@ class MainWindow(QMainWindow):
         跟卸载后那个清单不同：那边只看「这个软件留下的」，这边是全局摸底，
         用来找那些名字对不上、压根不知道属于谁的残留。
         """
-        from core.ai_leftover import collect_suspects, make_judge_worker
-        from ui.leftover_dialog import LeftoverDialog
+        from core.ai_leftover import collect_suspects
 
         view = getattr(self, "software_page", None)
         # AI 客户端是 bootstrap 时注入的，初始化阶段可能还是 None
@@ -647,14 +661,35 @@ class MainWindow(QMainWindow):
             )
             return
 
-        installed = [row.item for row in view.model.rows()] if view is not None else []
-        if not installed:
-            QMessageBox.information(self, "先把软件列表读出来", "切到「软件卸载」刷一下再来。")
-            return
-
         from core.scan_scopes import default_keys
         scope_keys = list(self.settings.scan_scopes) or default_keys()
-        suspects = collect_suspects(installed, kinds=("folder",), scopes=scope_keys)
+
+        def collect():
+            installed = view.model.all_items() if view is not None else []
+            if not installed:
+                from core.uninstall import enumerate_installed
+
+                installed, _warnings = enumerate_installed(include_orphans=False)
+            suspects = collect_suspects(
+                installed, kinds=("folder",), scopes=scope_keys,
+            )
+            return installed, suspects
+
+        self._run_background(
+            "正在收集全局残留候选…",
+            collect,
+            lambda data: self._confirm_global_leftovers(
+                ai, data[0], data[1], scope_keys,
+            ),
+        )
+
+    def _confirm_global_leftovers(self, ai, installed, suspects, scope_keys) -> None:
+        from core.ai_leftover import make_judge_worker
+        from ui.leftover_dialog import LeftoverDialog
+
+        if not installed:
+            QMessageBox.information(self, "读不到已装软件", "软件列表是空的，无法可靠判断残留。")
+            return
         if not suspects:
             QMessageBox.information(
                 self, "没找到候选",
@@ -662,11 +697,12 @@ class MainWindow(QMainWindow):
             )
             return
 
+        batch_size = max(1, int(getattr(ai.settings.ai, "max_batch", 25) or 25))
         answer = QMessageBox.question(
             self,
             "要扫了吗",
             f"找到 {len(suspects)} 个候选（不属于任何已装软件的**文件夹**）。\n\n"
-            f"接下来会分 {(len(suspects) + 24) // 25} 批交给 AI 判断，"
+            f"接下来会分 {(len(suspects) + batch_size - 1) // batch_size} 批交给 AI 判断，"
             "需要一点时间，也会消耗 token。\n"
             "判断结果只是建议，默认一个都不勾，最后删什么还是你说了算。",
             QMessageBox.Yes | QMessageBox.No,
@@ -740,12 +776,16 @@ class MainWindow(QMainWindow):
     def scan_orphans(self) -> None:
         """去 Program Files 下找那些「卸载列表里没有、但目录还在」的软件。"""
         from core.leftover import scan_orphans as find_orphans
+
+        self._run_background(
+            "正在扫描孤儿目录…",
+            lambda: find_orphans(),
+            self._show_orphans,
+        )
+
+    def _show_orphans(self, found) -> None:
         from ui.leftover_dialog import LeftoverDialog
 
-        try:
-            found = find_orphans()
-        except Exception:  # noqa: BLE001
-            found = []
         if not found:
             QMessageBox.information(
                 self, "没找到孤儿目录",
@@ -827,7 +867,6 @@ class MainWindow(QMainWindow):
             if callable(attach):
                 attach(self.ai)
 
-        self._fill_drives_sync()
         self.drive_enum.start()
         self._update_ai_action()
         self._purge_logs()
@@ -859,17 +898,25 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - 清理旧日志失败绝不影响启动
             pass
 
+    def _run_background(self, label: str, func, on_done) -> None:
+        """Run a slow read-only scan without blocking the event loop."""
+        from core.tasks import make_call_worker
+
+        worker = make_call_worker(func)
+        self._background_workers.add(worker)
+        self.lbl_status.setText(label)
+
+        def finished(value) -> None:
+            self._background_workers.discard(worker)
+            if value is None:
+                self._toast(f"{label.rstrip('…')}没有完成，请稍后重试")
+                return
+            on_done(value)
+
+        worker.signals.finished.connect(finished)
+        QThreadPool.globalInstance().start(worker)
+
     # --------------------------------------------------------------- 盘符
-    def _fill_drives_sync(self) -> None:
-        try:
-            from core.fs_browser import list_drives_sync
-
-            drives = list_drives_sync()
-        except Exception:  # noqa: BLE001
-            drives = []
-        for drive in drives:
-            self._upsert_drive(drive)
-
     def _upsert_drive(self, drive: DriveInfo) -> None:
         """盘符列表只存在内存里，给面包屑的下拉菜单用。"""
         for index, existing in enumerate(self._drives):
@@ -881,10 +928,14 @@ class MainWindow(QMainWindow):
 
     def _on_drive_updated(self, root: str, drive: DriveInfo) -> None:
         self._upsert_drive(drive)
+        if not self._current_dir and not self._pending_dir and self._current_module == PAGE_FILES:
+            self.show_drives()
 
     def _on_drives_finished(self, drives) -> None:
         for drive in drives:
             self._upsert_drive(drive)
+        if not self._current_dir and not self._pending_dir and self._current_module == PAGE_FILES:
+            self.show_drives()
 
     def _drive_menu(self) -> list:
         """面包屑第一段点开时给的盘符清单。"""
@@ -1149,7 +1200,8 @@ class MainWindow(QMainWindow):
             return
         page = self.stack.widget(self._current_module)
         if isinstance(page, ModulePage):
-            page.refresh()
+            refresh = getattr(page, "refresh_async", page.refresh)
+            refresh()
             self._refresh_status_bar()
 
     def _execute_current(self) -> None:
@@ -1304,7 +1356,11 @@ class MainWindow(QMainWindow):
 
     def _recalc_sizes(self) -> None:
         entries = self.model.entries()
-        dirs = [entry.human_path for entry in entries if entry.is_dir and not entry.locked]
+        dirs = [
+            entry.human_path
+            for entry in entries
+            if entry.is_dir and not entry.locked and entry.deletable
+        ]
         if not dirs:
             self._toast("这一页没有可以算大小的文件夹")
             return
@@ -1315,7 +1371,7 @@ class MainWindow(QMainWindow):
         self._pending_sizes = set(dirs)
         self.act_stop.setEnabled(True)
         for entry in entries:
-            if entry.is_dir and not entry.locked:
+            if entry.is_dir and not entry.locked and entry.deletable:
                 self.model.update_size(entry.human_path, None, "queued")
         if self.size_engine is not None:
             self.size_engine.enqueue(dirs, generation)
@@ -1355,7 +1411,7 @@ class MainWindow(QMainWindow):
             self.header.set_check_state(self.model.check_state())
         if not entries:
             self.lbl_selection.setText(
-                "已选 0 项（已过滤，仅对可见项生效）" if self.model.is_filtered() else "已选 0 项"
+                "已选 0 项（已过滤）" if self.model.is_filtered() else "已选 0 项"
             )
             return
         sizes = [entry.size for entry in entries]
@@ -1364,7 +1420,7 @@ class MainWindow(QMainWindow):
         if hidden:
             suffix += f" · 另有 {hidden} 项被过滤藏起来了但还勾着"
         if self.model.is_filtered():
-            suffix += "（已过滤，仅对可见项生效）"
+            suffix += "（已过滤；隐藏项也会执行）"
         if any(size is None for size in sizes):
             # 只要有一项还没算出多大，就只说选了几项，不编一个数字出来
             self.lbl_selection.setText(f"已选 {len(entries)} 项{suffix}")
@@ -1438,8 +1494,45 @@ class MainWindow(QMainWindow):
             self._toast("清单里一项都没留下，那就先不删了")
             return
         mode = Mode.PERMANENT if decision.mode == Mode.PERMANENT.value else Mode.RECYCLE
+        if not self._confirm_extra_recycle(decision.items, mode):
+            self._toast("已经取消，这一批没有删除")
+            return
         self._last_mode = mode
         self._start_delete(decision.items, mode)
+
+    def _confirm_extra_recycle(self, items, mode):
+        """Apply the configured large-recycle warning or extra confirmation."""
+        from core.delete import Mode
+
+        if mode is not Mode.RECYCLE:
+            return True
+        total = sum(
+            int(getattr(item, "size", 0) or 0)
+            for item in items
+        )
+        threshold = int(getattr(self.settings, "recycle_warn_over_gb", 20) or 0)
+        if threshold and total >= threshold * 1024 ** 3:
+            answer = QMessageBox.question(
+                self,
+                "回收站提醒",
+                f"这一批约有 {human_size(total)} 会先进入回收站，"
+                f"超过你设置的 {threshold} GB 提醒线。\n\n"
+                "回收站清空之前空间不会真正释放。确定继续吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return answer == QMessageBox.Yes
+        if bool(getattr(self.settings, "confirm_recycle", False)):
+            answer = QMessageBox.question(
+                self,
+                "再确认一次",
+                f"要把这 {len(items)} 项移入回收站吗？\n\n"
+                "删除后还能从回收站还原；清空回收站后才真正释放空间。",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return answer == QMessageBox.Yes
+        return True
 
     def _start_delete(self, items, mode) -> None:
         from core import snapshot as snapshots
@@ -1868,6 +1961,10 @@ class MainWindow(QMainWindow):
             self._toast(warnings[0])
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._busy or self._background_workers:
+            self._toast("还有任务在执行，完成后再关闭窗口")
+            event.ignore()
+            return
         self.settings.window_width = self.width()
         self.settings.window_height = self.height()
         self.settings.last_dir = self._current_dir

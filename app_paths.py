@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +20,8 @@ LEGACY_FALLBACK_DIR_NAME = "DiskCleanupHelper"
 
 _LONG_PREFIX = "\\\\?\\"
 _UNC_PREFIX = "\\\\?\\UNC\\"
+_RESOLVE_LOCK = threading.Lock()
+_RESOLVE_CACHE: "AppPaths | None" = None
 
 
 def to_long(path: str | os.PathLike[str]) -> str:
@@ -88,7 +92,7 @@ def _fallback_root() -> Path:
 
 def _writable(directory: Path) -> bool:
     """真写一次才算数：只读介质、权限被挡、路径过长都要能识别出来。"""
-    probe = directory / ".write-test"
+    probe = directory / f".write-test-{os.getpid()}-{threading.get_ident()}-{uuid.uuid4().hex}"
     try:
         directory.mkdir(parents=True, exist_ok=True)
         probe.write_bytes(b"1")
@@ -112,6 +116,18 @@ class AppPaths:
 
 
 def resolve() -> AppPaths:
+    global _RESOLVE_CACHE
+    cached = _RESOLVE_CACHE
+    if cached is not None:
+        return cached
+    with _RESOLVE_LOCK:
+        if _RESOLVE_CACHE is not None:
+            return _RESOLVE_CACHE
+        _RESOLVE_CACHE = _resolve_uncached()
+        return _RESOLVE_CACHE
+
+
+def _resolve_uncached() -> AppPaths:
     base = exe_dir()
     resource = resource_dir()
     if _writable(base):

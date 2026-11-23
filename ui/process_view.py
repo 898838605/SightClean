@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -244,11 +244,7 @@ class ProcessModel(FilterMixin, QAbstractTableModel):
         touched = False
         for row in self._rows:
             if row.item.pid in samples:
-                row.item = ProcessItem(
-                    pid=row.item.pid, name=row.item.name, username=row.item.username,
-                    rss=row.item.rss, cpu=samples[row.item.pid], exe=row.item.exe,
-                    publisher=row.item.publisher, locked=row.item.locked, system=row.item.system,
-                )
+                row.item = replace(row.item, cpu=samples[row.item.pid])
                 touched = True
         if touched:
             self.dataChanged.emit(self.index(0, COL_CPU),
@@ -331,6 +327,7 @@ class ProcessView(ModulePage):
         self.model = ProcessModel(self)
         self.model.checkedChanged.connect(self._on_checked_changed)
         self._worker = None
+        self._load_worker = None
         self._cpu_timer = QTimer(self)
         self._cpu_timer.setSingleShot(True)
         self._cpu_timer.timeout.connect(self._sample_cpu_now)
@@ -409,6 +406,9 @@ class ProcessView(ModulePage):
             items, warnings = enumerate_processes()
         except Exception:  # noqa: BLE001
             items, warnings = [], ["读取进程时出了点问题"]
+        self._apply_items(items, warnings)
+
+    def _apply_items(self, items, warnings) -> None:
         rows: list[ProcessRow] = []
         for item in items:
             result = self.kb.match_process(item.name, item.exe)
@@ -441,6 +441,27 @@ class ProcessView(ModulePage):
             self.statusMessage.emit(warnings[0])
         # CPU 百分比第一次必然读成 0，隔一会儿再采一次
         self._cpu_timer.start(CPU_SAMPLE_DELAY_MS)
+
+    def refresh_async(self) -> None:
+        if self._load_worker is not None:
+            return
+        from core.tasks import make_call_worker
+
+        self.filter_bar.set_pending("")
+        self.model.set_filter("")
+        self.statusMessage.emit("正在读取当前进程…")
+        worker = make_call_worker(lambda: enumerate_processes())
+        worker.signals.finished.connect(self._on_loaded)
+        self._load_worker = worker
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_loaded(self, loaded) -> None:
+        self._load_worker = None
+        if loaded is None:
+            items, warnings = [], ["读取进程时出了点问题"]
+        else:
+            items, warnings = loaded
+        self._apply_items(items, warnings)
 
     def _sample_cpu_now(self) -> None:
         pids = [row.item.pid for row in self.model.rows()]
@@ -486,7 +507,7 @@ class ProcessView(ModulePage):
         想要最新状态点「刷新」。
         """
         if not self.model.rows():
-            self.refresh()
+            self.refresh_async()
 
     # -- 勾选 --------------------------------------------------------------
     def _on_checked_changed(self) -> None:
@@ -573,10 +594,13 @@ class ProcessView(ModulePage):
         )
         if decision is None or not decision.items:
             return
-        pairs = [(row.item.pid, row.name) for row in decision.items]
+        pairs = [
+            (row.item.pid, row.name, row.item.create_time, row.item.exe)
+            for row in decision.items
+        ]
         from core import snapshot as snapshots
 
-        self._snap_id = snapshots.begin("kill", rows)
+        self._snap_id = snapshots.begin("kill", decision.items)
         worker = make_worker(pairs, self._log_dir())
         worker.signals.progress.connect(self._on_progress)
         worker.signals.finished.connect(self._on_finished)
@@ -616,7 +640,11 @@ class ProcessView(ModulePage):
         pairs = []
         for row in rows:
             try:
-                pairs.append((int(row.path), row.name))
+                pairs.append((
+                    int(row.path), row.name,
+                    getattr(row, "create_time", 0.0),
+                    getattr(row, "exe", ""),
+                ))
             except (TypeError, ValueError):
                 continue
         if not pairs:

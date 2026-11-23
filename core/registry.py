@@ -1,4 +1,4 @@
-"""注册表浏览、备份、删除、还原。
+r"""注册表浏览、备份、删除、还原。
 
 几条不能破的规矩：
 1. **懒加载**：进哪一级就只枚举哪一级的子键，绝不预先扫整棵树。
@@ -111,7 +111,7 @@ def is_critical(key_path: str) -> bool:
     return any(hint in lowered for hint in CRITICAL_HINTS)
 
 def _split(full_path: str) -> tuple[int, str, str]:
-    """HKEY_LOCAL_MACHINE\SOFTWARE\X → (句柄, HKEY_LOCAL_MACHINE, SOFTWARE\X)"""
+    r"""HKEY_LOCAL_MACHINE\SOFTWARE\X → (句柄, HKEY_LOCAL_MACHINE, SOFTWARE\X)"""
     text = str(full_path or "").strip()
     for full_name, short_name, hive in ROOTS:
         if text.lower().startswith(full_name.lower()):
